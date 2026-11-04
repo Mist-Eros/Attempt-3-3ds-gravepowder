@@ -1,0 +1,17 @@
+{
+  "kind": "zombie",
+  "source": "assets/models/zombie_animated.glb",
+  "scale": 1.0,
+  "yaw": 0.0,
+  "parts": ["Character"],
+  "animations": {
+    "idle":   "Armature|Idle",
+    "walk":   "Armature|Walk",
+    "run":    "Armature|Walk2",
+    "attack": "Armature|Attack",
+    "hit":    "Armature|Hit_reaction",
+    "death":  "Armature|Die"
+  },
+  "resample_hz": 30,
+  "notes": "Animated Zombie by bachosoftdesign (CC-BY 3.0, credit required). 4.5k verts / 2.1k tris, 49 joints; used for shamblers. Runner/brute can reuse the same base with a different scale + palette until we import their own models."
+}

@@ -1,0 +1,9 @@
+{
+  "kind": "weapon",
+  "source": "assets/models/gun_flintlock.glb",
+  "scale": 1.0,
+  "yaw": 0.0,
+  "animations": {},
+  "resample_hz": 0,
+  "notes": "Quaternius Pistol (CC0). Static; exported with its whole mesh set. The renderer orients/scales it for the first-person viewmodel and the third-person hand mount."
+}

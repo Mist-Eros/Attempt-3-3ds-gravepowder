@@ -1,0 +1,9 @@
+{
+  "kind": "weapon",
+  "source": "assets/models/gun_revolver.glb",
+  "scale": 1.0,
+  "yaw": 0.0,
+  "animations": {},
+  "resample_hz": 0,
+  "notes": "Revolver (CC-BY 3.0 on Poly Pizza). Static; credit required in README/release."
+}

@@ -1,0 +1,22 @@
+{
+  "kind": "hero",
+  "source": "assets/models/hero_medieval.glb",
+  "scale": 1.0,
+  "yaw": 180.0,
+  "parts": ["Medieval_Body", "Medieval_Legs", "Medieval_Feet"],
+  "attachments": {
+    "head": "Head",
+    "tail": "Hips",
+    "gun": "RightHand"
+  },
+  "animations": {
+    "idle":  "CharacterArmature|Idle_Gun",
+    "walk":  "CharacterArmature|Walk",
+    "run":   "CharacterArmature|Run",
+    "shoot": "CharacterArmature|Gun_Shoot",
+    "hit":   "CharacterArmature|HitRecieve",
+    "death": "CharacterArmature|Death"
+  },
+  "resample_hz": 30,
+  "notes": "Quaternius Medieval pack (CC0). We drop the imported head mesh and hang the procedural wolf head/ears/tail off the Head/Hips bones. Body recoloured toward a dusty coat; the importer applies colour_overrides per source mesh."
+}

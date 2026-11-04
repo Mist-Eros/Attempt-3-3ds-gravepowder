@@ -1,0 +1,9 @@
+{
+  "kind": "weapon",
+  "source": "assets/models/gun_musket.glb",
+  "scale": 1.0,
+  "yaw": 0.0,
+  "animations": {},
+  "resample_hz": 0,
+  "notes": "Quaternius Rifle (CC0). Long gun; static."
+}
