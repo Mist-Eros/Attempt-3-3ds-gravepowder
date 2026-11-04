@@ -21,3 +21,4 @@ tools/preview/SCREENSHOTS.md
 .DS_Store
 Thumbs.db
 *.swp
+*.pdb
