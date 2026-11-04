@@ -216,6 +216,11 @@ typedef struct {
     float   anim_speed;    /* 0 = idle, 1 = walk                       */
     bool    firing;        /* muzzle flash / shot flash timer          */
     float   muzzle_flash;
+
+    /* internal (append-only, app can ignore): the weapon the active reload
+     * timer belongs to.  Lets the core cancel a reload if the app swaps
+     * weapons by writing player.weapon directly. */
+    WeaponId reload_weapon;
 } Player;
 
 /* ------------------------------------------------------------------ */
@@ -289,6 +294,10 @@ typedef struct {
     Vec3      camera_pos;
     Vec3      camera_look;
     float     camera_fov;
+
+    /* internal (append-only): seed the RNG restarts from, so a zone restart
+     * through grave_game_start_zone is a clean deterministic replay. */
+    uint32_t  seed;
 } GraveGame;
 
 /* ------------------------------------------------------------------ */
