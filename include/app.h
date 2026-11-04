@@ -30,4 +30,9 @@ App *app_state(void);
 bool app_running(void);
 void app_request_exit(void);
 
+/* Polls hid state exactly once per video frame before the fixed-step loop:
+ * latches edge-triggered buttons (A/B/X/Y/START) and the touchscreen drag/tap
+ * so several 1/60 steps in one frame do not repeat them. */
+void app_poll_input(void);
+
 #endif /* GRAVEPOWDER_APP_H */
