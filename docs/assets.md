@@ -150,9 +150,13 @@ The game looks for these files, in order:
 1. `sdmc:/3ds/Gravepowder/models/<name>.gpm` (user override, no rebuild needed)
 2. embedded copy in the `.3dsx` (built from `assets/models/*.glb` at build time)
 
-Names: `hero.gpm`, `zombie_shambler.gpm`, `zombie_runner.gpm`, `zombie_brute.gpm`,
-`gun_flintlock.gpm`, `gun_revolver.gpm`, `gun_musket.gpm`. Missing or invalid files fall back to the
-procedural built-in meshes.
+Names: `hero.gpm`, `zombie.gpm` (one zombie model reused for shambler/runner/brute with per-type
+scale/tint), `gun_flintlock.gpm`, `gun_revolver.gpm`, `gun_musket.gpm`. Missing or invalid files fall
+back to the procedural built-in meshes.
+
+The `attachments` map in the import config is **not stored in the GPM file** (the format is frozen):
+the importer validates the names against the exported skeleton, and the runtime resolves them by
+scanning the bone name table (e.g. `Head`, `Hips`, `Wrist.R`).
 
 ## Performance budget on the 3DS
 
