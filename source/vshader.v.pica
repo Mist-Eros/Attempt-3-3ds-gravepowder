@@ -1,0 +1,38 @@
+; Gravepowder - minimal vertex shader for the 3D pipeline skeleton
+;
+; position: 3 floats (v0)
+; colour:   4 floats via the fixed attribute (v1); the fragment stage just
+;           outputs this primary colour (see C3D_TexEnv in main.c).
+
+.fvec projection[4]
+.fvec modelView[4]
+
+.constf one(1.0, 1.0, 1.0, 1.0)
+.alias ones one.xxxx
+
+.out outpos position
+.out outclr color
+
+.alias inpos v0
+.alias inclr v1
+
+.proc main
+    ; r0 = (position, 1)
+    mov r0.xyz, inpos
+    mov r0.w,   ones
+
+    ; r1 = modelView * r0
+    dp4 r1.x, modelView[0], r0
+    dp4 r1.y, modelView[1], r0
+    dp4 r1.z, modelView[2], r0
+    dp4 r1.w, modelView[3], r0
+
+    ; outpos = projection * r1
+    dp4 outpos.x, projection[0], r1
+    dp4 outpos.y, projection[1], r1
+    dp4 outpos.z, projection[2], r1
+    dp4 outpos.w, projection[3], r1
+
+    mov outclr, inclr
+    end
+.end

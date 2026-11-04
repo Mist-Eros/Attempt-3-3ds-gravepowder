@@ -1,0 +1,23 @@
+# build artifacts
+build/
+*.3dsx
+*.elf
+*.smdh
+*.o
+*.d
+
+# host tools
+tests/test_*.exe
+tests/test_*.exe.*
+tools/sim.exe
+tools/preview/preview.exe
+tools/preview/preview.pdb
+tools/preview/out/
+tools/preview/out_zoom/
+tools/preview/preview_run.log
+tools/preview/SCREENSHOTS.md
+
+# editors / OS
+.DS_Store
+Thumbs.db
+*.swp

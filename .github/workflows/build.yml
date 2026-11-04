@@ -1,0 +1,37 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build 3dsx
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: devkitpro/devkitarm:latest
+      options: --user root
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: build
+        run: make
+
+      - name: upload 3dsx
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gravepowder-3dsx
+          path: Gravepowder.3dsx
+          if-no-files-found: error
+          retention-days: 30
