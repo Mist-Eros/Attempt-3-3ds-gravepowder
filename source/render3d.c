@@ -1422,6 +1422,16 @@ static bool r3d_hero_buffers_alloc(const GpmModel *m)
     s_hero_ibo = (uint16_t *)linearAlloc((size_t)m->index_count * sizeof(uint16_t));
     if (s_hero_vbo == NULL || s_hero_ibo == NULL) {
         r3d_asset_log("hero: skin buffer alloc failed (verts=%d)", verts);
+        if (s_hero_vbo != NULL) {
+            linearFree(s_hero_vbo);
+            s_hero_vbo = NULL;
+        }
+        if (s_hero_ibo != NULL) {
+            linearFree(s_hero_ibo);
+            s_hero_ibo = NULL;
+        }
+        s_hero_vert_cap = 0;
+        s_hero_index_count = 0;
         return false;
     }
     memcpy(s_hero_ibo, m->indices, (size_t)m->index_count * sizeof(uint16_t));
@@ -2881,8 +2891,10 @@ bool r3d_set_hero_model(const struct GpmModel *model)
     if (!gpm_is_skinned(model) || model->vertex_count == 0 ||
         model->vertex_count > R3D_MAX_MODEL_VERTS)
         return false;
-    if (!r3d_hero_buffers_alloc(model))
+    if (!r3d_hero_buffers_alloc(model)) {
+        s_gpm_hero_ready = false;
         return false;
+    }
     s_hero_model_borrowed = model;
     r3d_hero_configure(model);
     s_gpm_hero_ready = true;
@@ -2904,8 +2916,10 @@ bool r3d_reload_hero_model(void)
     emb = r3d_hero_embedded_model();
     if (!r3d_load_one_model(&s_gpm_hero, &s_gpm_hero_ok, "hero", &emb, true))
         return false;
-    if (!r3d_hero_buffers_alloc(&s_gpm_hero))
+    if (!r3d_hero_buffers_alloc(&s_gpm_hero)) {
+        s_gpm_hero_ready = false;
         return false;
+    }
     r3d_hero_configure(&s_gpm_hero);
     s_gpm_hero_ready = true;
     return true;
