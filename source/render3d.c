@@ -37,7 +37,7 @@
 #define R3D_BOT_H 320
 
 /* dusty overcast sky; the fog fades into exactly this colour */
-#define R3D_CLEAR_COLOR 0x786E5CFFu
+#define R3D_CLEAR_COLOR 0x7A6E58FFu
 
 #define R3D_NEAR      0.10f
 #define R3D_FAR       160.0f
@@ -45,20 +45,20 @@
 #define R3D_FOG_FAR   58.0f
 #define R3D_FOG_INV   (1.0f / (R3D_FOG_FAR - R3D_FOG_NEAR))
 
-#define R3D_SKY_R 0.4706f
+#define R3D_SKY_R 0.4784f
 #define R3D_SKY_G 0.4314f
-#define R3D_SKY_B 0.3608f
+#define R3D_SKY_B 0.3451f
 
-#define R3D_LIGHT_R 0.82f
-#define R3D_LIGHT_G 0.70f
-#define R3D_LIGHT_B 0.50f
+#define R3D_LIGHT_R 0.86f
+#define R3D_LIGHT_G 0.72f
+#define R3D_LIGHT_B 0.47f
 
 #define R3D_AMBIENT_R 0.42f
 #define R3D_AMBIENT_G 0.42f
 #define R3D_AMBIENT_B 0.46f
 
-#define R3D_FILL_R 0.26f
-#define R3D_FILL_G 0.24f
+#define R3D_FILL_R 0.30f
+#define R3D_FILL_G 0.26f
 #define R3D_FILL_B 0.22f
 
 #define R3D_MESH_ARENA_BYTES (2u * 1024u * 1024u)
