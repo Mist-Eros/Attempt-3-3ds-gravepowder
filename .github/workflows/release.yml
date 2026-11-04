@@ -24,7 +24,21 @@ jobs:
         run: make
 
       - name: package
-        run: zip -j Gravepowder.3dsx.zip Gravepowder.3dsx
+        run: |
+          zip -j Gravepowder.3dsx.zip Gravepowder.3dsx
+          # SD-swap package: 3ds/Gravepowder/models/*.gpm on the SD card
+          # overrides the models embedded in the .3dsx.
+          mkdir -p pkg/3ds/Gravepowder/models
+          if ls data/models/*.gpm >/dev/null 2>&1; then
+            cp data/models/*.gpm pkg/3ds/Gravepowder/models/
+          else
+            echo "no data/models/*.gpm - packaging an empty models folder"
+            echo "Place .gpm model files here to override the embedded models." \
+              > pkg/3ds/Gravepowder/models/README.txt
+          fi
+          cp assets/LICENSES.md pkg/3ds/Gravepowder/models/ATTRIBUTION.md
+          (cd pkg && zip -r ../Gravepowder-models.zip 3ds)
+          ls -l Gravepowder.3dsx.zip Gravepowder-models.zip
 
       - name: publish release
         uses: softprops/action-gh-release@v2
@@ -46,3 +60,4 @@ jobs:
           files: |
             Gravepowder.3dsx
             Gravepowder.3dsx.zip
+            Gravepowder-models.zip

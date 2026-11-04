@@ -215,6 +215,17 @@ void mesh_build_weapons(Mesh out[WEAPON_COUNT], MeshArena *arena,
 void mesh_build_quad(Mesh *out, MeshArena *arena,
                      MeshVertex *scratch, int scratch_cap);
 
+/* Procedural wolf head (skull, muzzle, ears, eyes, hat) built around the
+ * origin, facing +Z, sized for a 1.8 m hero.  Attached to an imported
+ * skeleton's Head bone by the renderer. */
+void mesh_build_wolf_head(Mesh *out, MeshArena *arena,
+                          MeshVertex *scratch, int scratch_cap);
+
+/* Three bushy tail segments, each built around the origin extending towards
+ * -Z; the renderer chains them off the imported Hips bone. */
+void mesh_build_wolf_tail(Mesh out[3], MeshArena *arena,
+                          MeshVertex *scratch, int scratch_cap);
+
 /* Flat unit-radius disc at y = 0 (normal +Y); used as a blob shadow. */
 void mesh_build_shadow_disc(Mesh *out, MeshArena *arena,
                             MeshVertex *scratch, int scratch_cap);

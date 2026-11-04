@@ -38,7 +38,7 @@ APP_DESCRIPTION :=      a 3D zombie shooter with old guns
 APP_AUTHOR      :=      Mist-Eros
 BUILD		:=	build
 SOURCES		:=	source source/core
-DATA		:=	data
+DATA		:=	data data/models
 INCLUDES	:=	include
 GRAPHICS	:=	gfx
 GFXBUILD	:=	$(BUILD)
@@ -208,6 +208,16 @@ $(OUTPUT).elf	:	$(OFILES)
 # you need a rule like this for each extension you use as binary data
 #---------------------------------------------------------------------------------
 %.bin.o	%_bin.h :	%.bin
+#---------------------------------------------------------------------------------
+	@echo $(notdir $<)
+	@$(bin2o)
+
+#---------------------------------------------------------------------------------
+# converted GPM models (tools/import_model.py -> data/models/*.gpm).  A missing
+# or empty data/models/ directory just contributes no BINFILES, so the repo
+# builds before the asset converter has ever run.
+#---------------------------------------------------------------------------------
+%.gpm.o	%_gpm.h :	%.gpm
 #---------------------------------------------------------------------------------
 	@echo $(notdir $<)
 	@$(bin2o)

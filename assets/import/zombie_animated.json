@@ -1,6 +1,7 @@
 {
   "kind": "zombie",
   "source": "assets/models/zombie_animated.glb",
+  "credit": "Animated Zombie by bachosoftdesign - CC-BY 3.0 - https://poly.pizza/m/xqEzosAVYX",
   "scale": 1.0,
   "yaw": 0.0,
   "parts": ["Character"],

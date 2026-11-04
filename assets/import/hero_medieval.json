@@ -1,8 +1,9 @@
 {
   "kind": "hero",
   "source": "assets/models/hero_medieval.glb",
-  "scale": 1.0,
-  "yaw": 180.0,
+  "credit": "Quaternius - Medieval pack - CC0 - https://poly.pizza/m/y9KWOVG21R",
+  "scale": 1.18,
+  "yaw": 0.0,
   "parts": [
     "Medieval_Body",
     "Medieval_Legs",

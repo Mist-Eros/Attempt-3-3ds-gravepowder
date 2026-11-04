@@ -19,11 +19,62 @@
 #include <3ds.h>
 #include <citro3d.h>
 #include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "render3d.h"
+#include "gpm.h"
 #include "mesh.h"
+#include "skin.h"
 #include "vshader_shbin.h"
+
+/* ------------------------------------------------------------------ */
+/* embedded default models (data/models/<name>.gpm, converted at build) */
+/*                                                                     */
+/* Missing headers keep the build green before the converter has run;  */
+/* the runtime then falls back to the procedural meshes.  SD-card       */
+/* overrides (sdmc:/3ds/Gravepowder/models/<name>.gpm) win over these.  */
+/* ------------------------------------------------------------------ */
+
+#if defined(__has_include)
+#  if __has_include("hero_gpm.h")
+#    include "hero_gpm.h"
+#    define R3D_HAVE_EMBEDDED_HERO 1
+#  endif
+#  if __has_include("zombie_gpm.h")
+#    include "zombie_gpm.h"
+#    define R3D_HAVE_EMBEDDED_ZOMBIE 1
+#  endif
+#  if __has_include("gun_flintlock_gpm.h")
+#    include "gun_flintlock_gpm.h"
+#    define R3D_HAVE_EMBEDDED_GUN_FLINTLOCK 1
+#  endif
+#  if __has_include("gun_revolver_gpm.h")
+#    include "gun_revolver_gpm.h"
+#    define R3D_HAVE_EMBEDDED_GUN_REVOLVER 1
+#  endif
+#  if __has_include("gun_musket_gpm.h")
+#    include "gun_musket_gpm.h"
+#    define R3D_HAVE_EMBEDDED_GUN_MUSKET 1
+#  endif
+#endif
+
+#ifndef R3D_HAVE_EMBEDDED_HERO
+#define R3D_HAVE_EMBEDDED_HERO 0
+#endif
+#ifndef R3D_HAVE_EMBEDDED_ZOMBIE
+#define R3D_HAVE_EMBEDDED_ZOMBIE 0
+#endif
+#ifndef R3D_HAVE_EMBEDDED_GUN_FLINTLOCK
+#define R3D_HAVE_EMBEDDED_GUN_FLINTLOCK 0
+#endif
+#ifndef R3D_HAVE_EMBEDDED_GUN_REVOLVER
+#define R3D_HAVE_EMBEDDED_GUN_REVOLVER 0
+#endif
+#ifndef R3D_HAVE_EMBEDDED_GUN_MUSKET
+#define R3D_HAVE_EMBEDDED_GUN_MUSKET 0
+#endif
 
 #define PI_F 3.14159265f
 
@@ -66,6 +117,15 @@
 #define R3D_DYN_VERTS        2048
 #define R3D_MAX_PUFFS        24
 #define R3D_DUST_COUNT      16
+
+/* imported-model runtime (GPM v1) */
+#define R3D_HERO_HEIGHT        1.88f  /* hat-top height in metres (Lead: 1.85-1.90) */
+#define R3D_HERO_HEAD_TOP      0.335f /* procedural hat top above the Head bone */
+#define R3D_NEAR_ZOMBIES       3      /* fully skinned zombies                */
+#define R3D_SKIN_BUDGET        20000  /* max skinned verts/frame total        */
+#define R3D_ZOMBIE_LOD_DIST    14.0f  /* further zombies reuse a shared pose  */
+#define R3D_MODEL_DIR          "sdmc:/3ds/Gravepowder/models/"
+#define R3D_MAX_MODEL_VERTS    12000  /* dynamic VBO capacity per instance    */
 
 /* core's muzzle_flash timer counts down from 0.07 s */
 #define R3D_MUZZLE_FLASH_TIME 0.07f
@@ -121,6 +181,65 @@ static Mesh s_zombie_poses[ZOMBIE_COUNT][ZOMBIE_POSE_COUNT];
 
 static HeroRig s_hero_builtin;
 static const HeroRig *s_hero_rig;
+static bool s_hero_rig_override;   /* user installed a procedural rig */
+
+/* ------------------------------------------------------------------ */
+/* imported model state (GPM v1 + CPU skinning)                       */
+/* ------------------------------------------------------------------ */
+
+static GpmModel s_gpm_hero;
+static bool s_gpm_hero_ok;
+static GpmModel s_gpm_zombie;
+static bool s_gpm_zombie_ok;
+static GpmModel s_gpm_gun[WEAPON_COUNT];
+static bool s_gpm_gun_ok[WEAPON_COUNT];
+static Mesh s_gpm_gun_mesh[WEAPON_COUNT];  /* baked static meshes (arena)  */
+static float s_gpm_gun_scale[WEAPON_COUNT];
+static Vec3 s_gpm_gun_muzzle_local[WEAPON_COUNT]; /* +Z barrel tip, model space */
+
+/* hero runtime */
+static SkinInstance s_hero_skin;
+static bool s_gpm_hero_ready;
+static MeshVertex *s_hero_vbo;      /* linearAlloc'd dynamic skinned verts  */
+static uint16_t *s_hero_ibo;        /* linearAlloc'd static index buffer    */
+static int s_hero_vert_cap;
+static int s_hero_index_count;
+static Mesh s_wolf_head;            /* procedural wolf head+ears+hat        */
+static Mesh s_wolf_tail[3];         /* procedural bushy tail segments       */
+static int s_hero_bone_head = -1;
+static int s_hero_bone_hips = -1;
+static int s_hero_bone_wrist = -1;
+static Vec3 s_hero_head_rest;
+static Vec3 s_hero_hips_rest;
+static Vec3 s_hero_wrist_rest;
+static float s_hero_model_scale = 1.0f;
+static float s_hero_bbox_min_y;
+static int s_hero_clip_idle = -1, s_hero_clip_walk = -1, s_hero_clip_run = -1;
+static int s_hero_clip_shoot = -1, s_hero_clip_hit = -1, s_hero_clip_death = -1;
+static float s_hero_shoot_clock;
+static float s_hero_death_clock;
+static bool s_hero_was_firing;
+static bool s_hero_was_alive = true;
+
+/* zombie runtime (nearest N skinned per frame + one shared far pose) */
+static SkinInstance s_zombie_skin[R3D_NEAR_ZOMBIES];
+static MeshVertex *s_zombie_vbo[R3D_NEAR_ZOMBIES];
+static bool s_zombie_slot_inited[R3D_NEAR_ZOMBIES];
+static uint16_t *s_zombie_ibo;
+static int s_zombie_index_count;
+static int s_zombie_vert_count;
+static int s_zombie_vert_cap;
+static SkinInstance s_zombie_far_skin;
+static MeshVertex *s_zombie_far_vbo;
+static bool s_zombie_far_inited;
+static float s_zombie_far_clock;
+static float s_zombie_model_scale = 0.93f;
+static float s_zombie_bbox_min_y;
+static int s_zombie_clip_idle = -1, s_zombie_clip_walk = -1, s_zombie_clip_run = -1;
+static int s_zombie_clip_attack = -1, s_zombie_clip_hit = -1, s_zombie_clip_death = -1;
+
+/* frame delta for skinned animation (set once per r3d_draw_world) */
+static float s_draw_dt;
 
 static C3D_Mtx s_ortho;
 static C3D_Mtx s_last_projection;
@@ -133,6 +252,10 @@ static unsigned s_draw_calls;
 static unsigned s_draw_verts;
 static unsigned s_mesh_verts;
 static unsigned s_mesh_bytes;
+static unsigned s_skin_verts_frame;    /* verts skinned this frame             */
+static unsigned s_skin_bones_frame;    /* bone poses evaluated this frame      */
+static unsigned s_skin_instances_frame;/* skinned instances updated this frame */
+static unsigned s_dynamic_bytes;      /* linearAlloc'd skinned/dynamic memory */
 
 /* smoke puffs + muzzle tracking */
 typedef struct {
@@ -1068,6 +1191,1000 @@ static void draw_crosshair(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* imported models: GPM v1 loading + CPU skinning                    */
+/* ------------------------------------------------------------------ */
+
+/* Small trace file so model swaps on SD can be debugged from a PC.  Written
+ * only during init / explicit reload, never per frame. */
+static void r3d_asset_log(const char *fmt, ...)
+{
+    FILE *f = fopen("sdmc:/gp_assets.txt", "a");
+    va_list ap;
+    if (f == NULL)
+        return;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+    fclose(f);
+}
+
+static void mtx_from_floats(C3D_Mtx *out, const float *f)
+{
+    memcpy(out->m, f, 16u * sizeof(float));
+}
+
+static Vec3 mtx_translation(const float *f)
+{
+    return v3(f[3], f[7], f[11]);
+}
+
+static float deg2rad(float d)
+{
+    return d * (PI_F / 180.0f);
+}
+
+/* Builds T(rest + offset) * R(euler) * S(scale) into `local`. */
+static void attach_local(C3D_Mtx *local, Vec3 rest, Vec3 offset,
+                         Vec3 euler_deg, float scale)
+{
+    Mtx_Identity(local);
+    Mtx_Translate(local, rest.x + offset.x, rest.y + offset.y, rest.z + offset.z, true);
+    Mtx_RotateX(local, deg2rad(euler_deg.x), true);
+    Mtx_RotateY(local, deg2rad(euler_deg.y), true);
+    Mtx_RotateZ(local, deg2rad(euler_deg.z), true);
+    Mtx_Scale(local, scale, scale, scale);
+}
+
+/* Case-insensitive substring bone lookup with exact-name fast path. */
+static int r3d_find_bone_flexible(const GpmModel *m, const char *exact,
+                                  const char *substr)
+{
+    uint32_t i;
+    int idx;
+
+    if (m == NULL || m->bones == NULL)
+        return -1;
+    idx = gpm_find_bone(m, exact);
+    if (idx >= 0)
+        return idx;
+    if (substr == NULL)
+        return -1;
+    for (i = 0; i < m->bone_count; i++) {
+        const char *name = gpm_name(m, m->bones[i].name_off);
+        const char *a, *b;
+        if (name == NULL)
+            continue;
+        /* substring search, ASCII case-insensitive */
+        for (a = name; *a != '\0'; a++) {
+            const char *p = a;
+            b = substr;
+            while (*p != '\0' && *b != '\0') {
+                char ca = (*p >= 'A' && *p <= 'Z') ? (char)(*p + 32) : *p;
+                char cb = (*b >= 'A' && *b <= 'Z') ? (char)(*b + 32) : *b;
+                if (ca != cb)
+                    break;
+                p++;
+                b++;
+            }
+            if (*b == '\0')
+                return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* Bakes a GPM vertex/index list into a normal static Mesh (guns, props). */
+static bool gpm_bake_static_mesh(Mesh *out, const GpmModel *m,
+                                 MeshVertex *scratch, int scratch_cap)
+{
+    MeshBuilder b;
+    C3D_Mtx id;
+    uint32_t i;
+
+    mesh_builder_begin(&b, scratch, scratch_cap);
+    Mtx_Identity(&id);
+    for (i = 0; i < m->index_count; i++) {
+        const GpmVertex *v = &m->vertices[m->indices[i]];
+        mesh_builder_vertex(&b, &id,
+                            v->pos[0], v->pos[1], v->pos[2],
+                            v->nrm[0], v->nrm[1], v->nrm[2],
+                            (float)v->col[0] * (1.0f / 255.0f),
+                            (float)v->col[1] * (1.0f / 255.0f),
+                            (float)v->col[2] * (1.0f / 255.0f));
+    }
+    return mesh_commit(&b, out, &s_arena);
+}
+
+typedef struct {
+    const char *name;
+    const void *data;
+    size_t      size;
+} R3dEmbeddedModel;
+
+static bool r3d_load_one_model(GpmModel *model, bool *ok, const char *name,
+                               const R3dEmbeddedModel *embedded, bool need_skinned)
+{
+    char path[160];
+    const char *err;
+
+    *ok = false;
+    memset(model, 0, sizeof(*model));
+
+    snprintf(path, sizeof(path), R3D_MODEL_DIR "%s.gpm", name);
+    err = gpm_load_file(model, path);
+    if (err == NULL) {
+        r3d_asset_log("%-14s SD        %s verts=%u idx=%u bones=%u anims=%u",
+                      name, path, model->vertex_count, model->index_count,
+                      model->bone_count, model->anim_count);
+    } else {
+        r3d_asset_log("%-14s SD miss   %s (%s)", name, path, err);
+        if (embedded != NULL && embedded->data != NULL && embedded->size > 0) {
+            err = gpm_parse_memory(model, embedded->data, embedded->size);
+            if (err == NULL) {
+                r3d_asset_log("%-14s embedded  verts=%u idx=%u bones=%u anims=%u",
+                              name, model->vertex_count, model->index_count,
+                              model->bone_count, model->anim_count);
+            } else {
+                r3d_asset_log("%-14s embedded BAD (%s)", name, err);
+            }
+        } else {
+            r3d_asset_log("%-14s no embedded copy", name);
+        }
+    }
+
+    if (model->data == NULL)
+        return false;
+    if (need_skinned && !gpm_is_skinned(model)) {
+        r3d_asset_log("%-14s rejected: not skinned", name);
+        gpm_destroy(model);
+        return false;
+    }
+    *ok = true;
+    return true;
+}
+
+/* Resolves standard clip roles into model clip indices (with fallbacks). */
+static int clip_chain(const GpmModel *m, const char *const *roles, int count)
+{
+    if (m == NULL || m->data == NULL)
+        return -1;
+    return gpm_find_anim_chain(m, roles, count);
+}
+
+static void r3d_resolve_hero_clips(const GpmModel *m)
+{
+    static const char *const idle[]  = { "idle" };
+    static const char *const walk[]  = { "walk", "idle" };
+    static const char *const run[]   = { "run", "walk", "idle" };
+    static const char *const shoot[] = { "shoot", "attack", "reload", "idle" };
+    static const char *const hit[]   = { "hit", "idle" };
+    static const char *const death[] = { "death", "hit", "idle" };
+
+    s_hero_clip_idle = clip_chain(m, idle, 1);
+    s_hero_clip_walk = clip_chain(m, walk, 2);
+    s_hero_clip_run = clip_chain(m, run, 3);
+    s_hero_clip_shoot = clip_chain(m, shoot, 4);
+    s_hero_clip_hit = clip_chain(m, hit, 2);
+    s_hero_clip_death = clip_chain(m, death, 3);
+}
+
+static void r3d_resolve_zombie_clips(void)
+{
+    static const char *const idle[]   = { "idle", "walk" };
+    static const char *const walk[]   = { "walk", "idle" };
+    static const char *const run[]    = { "run", "walk", "idle" };
+    static const char *const attack[] = { "attack", "shoot", "walk", "idle" };
+    static const char *const hit[]    = { "hit", "idle" };
+    static const char *const death[]  = { "death", "hit", "idle" };
+
+    s_zombie_clip_idle = clip_chain(&s_gpm_zombie, idle, 2);
+    s_zombie_clip_walk = clip_chain(&s_gpm_zombie, walk, 2);
+    s_zombie_clip_run = clip_chain(&s_gpm_zombie, run, 3);
+    s_zombie_clip_attack = clip_chain(&s_gpm_zombie, attack, 4);
+    s_zombie_clip_hit = clip_chain(&s_gpm_zombie, hit, 2);
+    s_zombie_clip_death = clip_chain(&s_gpm_zombie, death, 3);
+}
+
+/* ------------------------------------------------------------------ */
+/* dynamic skinning buffers (linearAlloc, GPU visible)                 */
+/* ------------------------------------------------------------------ */
+
+/* (Re)allocates the hero dynamic VBO + static IBO for a model.  Old buffers
+ * are released first, so this doubles as the hot-swap path. */
+static bool r3d_hero_buffers_alloc(const GpmModel *m)
+{
+    int verts;
+
+    if (s_hero_vbo != NULL) {
+        linearFree(s_hero_vbo);
+        s_hero_vbo = NULL;
+    }
+    if (s_hero_ibo != NULL) {
+        linearFree(s_hero_ibo);
+        s_hero_ibo = NULL;
+    }
+    s_hero_vert_cap = 0;
+    s_hero_index_count = 0;
+    if (m == NULL || m->data == NULL || m->vertex_count == 0 ||
+        m->index_count == 0 || m->vertex_count > R3D_MAX_MODEL_VERTS)
+        return false;
+    verts = (int)m->vertex_count;
+    s_hero_vbo = (MeshVertex *)linearAlloc((size_t)verts * sizeof(MeshVertex));
+    s_hero_ibo = (uint16_t *)linearAlloc((size_t)m->index_count * sizeof(uint16_t));
+    if (s_hero_vbo == NULL || s_hero_ibo == NULL) {
+        r3d_asset_log("hero: skin buffer alloc failed (verts=%d)", verts);
+        return false;
+    }
+    memcpy(s_hero_ibo, m->indices, (size_t)m->index_count * sizeof(uint16_t));
+    s_hero_vert_cap = verts;
+    s_hero_index_count = (int)m->index_count;
+    return true;
+}
+
+/* Fills all hero runtime state (bones, rest pivots, scale, clips, skinning
+ * instance) from a model.  Used by init, reload and r3d_set_hero_model. */
+static void r3d_hero_configure(const GpmModel *m)
+{
+    float height = m->bbox_max.y - m->bbox_min.y;
+
+    s_hero_bbox_min_y = m->bbox_min.y;
+    s_hero_bone_head = r3d_find_bone_flexible(m, "Head", "head");
+    s_hero_bone_hips = r3d_find_bone_flexible(m, "Hips", "hip");
+    s_hero_bone_wrist = r3d_find_bone_flexible(m, "Wrist.R", "wrist");
+    if (s_hero_bone_wrist < 0)
+        s_hero_bone_wrist = r3d_find_bone_flexible(m, "Hand.R", "hand");
+    s_hero_head_rest = (s_hero_bone_head >= 0)
+        ? mtx_translation(&m->rest_world[s_hero_bone_head * 16]) : v3(0, 1.5f, 0);
+    /* The imported hero has no head mesh: the procedural wolf head rides the
+     * Head bone.  Scale the body so that (body head bone + wolf hat top) comes
+     * out at R3D_HERO_HEIGHT, which also survives re-exports that change the
+     * source scaling. */
+    if (s_hero_bone_head >= 0 && s_hero_head_rest.y > 0.6f) {
+        float above = R3D_HERO_HEIGHT - R3D_HERO_HEAD_TOP;
+        s_hero_model_scale = above / s_hero_head_rest.y;
+    } else {
+        s_hero_model_scale = (height > 0.1f) ? (R3D_HERO_HEIGHT / height) : 1.0f;
+    }
+    if (s_hero_model_scale < 0.4f) s_hero_model_scale = 0.4f;
+    if (s_hero_model_scale > 2.5f) s_hero_model_scale = 2.5f;
+    s_hero_hips_rest = (s_hero_bone_hips >= 0)
+        ? mtx_translation(&m->rest_world[s_hero_bone_hips * 16]) : v3(0, 0.95f, 0);
+    s_hero_wrist_rest = (s_hero_bone_wrist >= 0)
+        ? mtx_translation(&m->rest_world[s_hero_bone_wrist * 16]) : v3(0.2f, 1.0f, 0);
+    r3d_resolve_hero_clips(m);
+    skin_init(&s_hero_skin, m);
+    s_hero_was_firing = false;
+    s_hero_was_alive = true;
+    s_hero_shoot_clock = 0.0f;
+    s_hero_death_clock = 0.0f;
+    r3d_asset_log("hero:  height=%.2f scale=%.3f bones head=%d hips=%d wrist=%d",
+                  height, s_hero_model_scale, s_hero_bone_head,
+                  s_hero_bone_hips, s_hero_bone_wrist);
+}
+
+static R3dEmbeddedModel r3d_hero_embedded_model(void)
+{
+    R3dEmbeddedModel emb;
+    emb.name = "hero";
+#if R3D_HAVE_EMBEDDED_HERO
+    emb.data = hero_gpm;
+    emb.size = (size_t)hero_gpm_size;
+#else
+    emb.data = NULL;
+    emb.size = 0;
+#endif
+    return emb;
+}
+
+static bool r3d_alloc_skin_zombie(void)
+{
+    int i;
+    int verts;
+
+    if (!s_gpm_zombie_ok)
+        return false;
+    verts = (int)s_gpm_zombie.vertex_count;
+    if (verts <= 0 || verts > R3D_MAX_MODEL_VERTS)
+        return false;
+    s_zombie_ibo = (uint16_t *)linearAlloc((size_t)s_gpm_zombie.index_count * sizeof(uint16_t));
+    s_zombie_far_vbo = (MeshVertex *)linearAlloc((size_t)verts * sizeof(MeshVertex));
+    if (s_zombie_ibo == NULL || s_zombie_far_vbo == NULL) {
+        r3d_asset_log("zombie: skin buffer alloc failed (verts=%d)", verts);
+        return false;
+    }
+    for (i = 0; i < R3D_NEAR_ZOMBIES; i++) {
+        s_zombie_vbo[i] = (MeshVertex *)linearAlloc((size_t)verts * sizeof(MeshVertex));
+        if (s_zombie_vbo[i] == NULL) {
+            r3d_asset_log("zombie: near slot alloc failed (slot=%d)", i);
+            return false;
+        }
+    }
+    memcpy(s_zombie_ibo, s_gpm_zombie.indices,
+           (size_t)s_gpm_zombie.index_count * sizeof(uint16_t));
+    s_zombie_vert_cap = verts;
+    s_zombie_index_count = (int)s_gpm_zombie.index_count;
+    s_zombie_vert_count = verts;
+    return true;
+}
+
+/* Loads every optional model, then prepares the skinning runtime.  Called
+ * once from r3d_init (and again from the reload API). */
+static void r3d_assets_init(void)
+{
+    R3dEmbeddedModel zombie_emb;
+    R3dEmbeddedModel gun_emb[WEAPON_COUNT];
+    const char *gun_names[WEAPON_COUNT] = { "gun_flintlock", "gun_revolver", "gun_musket" };
+    /* barrel length used to auto-scale the imported gun to fit the hand */
+    static const float gun_len[WEAPON_COUNT] = { 0.42f, 0.34f, 1.05f };
+    int w;
+
+    {
+        FILE *f = fopen("sdmc:/gp_assets.txt", "w");
+        if (f != NULL) {
+            fprintf(f, "Gravepowder model loader\n");
+            fclose(f);
+        }
+    }
+
+
+#if R3D_HAVE_EMBEDDED_ZOMBIE
+    zombie_emb.name = "zombie";
+    zombie_emb.data = zombie_gpm;
+    zombie_emb.size = (size_t)zombie_gpm_size;
+#else
+    zombie_emb.name = "zombie";
+    zombie_emb.data = NULL;
+    zombie_emb.size = 0;
+#endif
+#if R3D_HAVE_EMBEDDED_GUN_FLINTLOCK
+    gun_emb[WEAPON_FLINTLOCK].name = "gun_flintlock";
+    gun_emb[WEAPON_FLINTLOCK].data = gun_flintlock_gpm;
+    gun_emb[WEAPON_FLINTLOCK].size = (size_t)gun_flintlock_gpm_size;
+#else
+    gun_emb[WEAPON_FLINTLOCK].name = "gun_flintlock";
+    gun_emb[WEAPON_FLINTLOCK].data = NULL;
+    gun_emb[WEAPON_FLINTLOCK].size = 0;
+#endif
+#if R3D_HAVE_EMBEDDED_GUN_REVOLVER
+    gun_emb[WEAPON_REVOLVER].name = "gun_revolver";
+    gun_emb[WEAPON_REVOLVER].data = gun_revolver_gpm;
+    gun_emb[WEAPON_REVOLVER].size = (size_t)gun_revolver_gpm_size;
+#else
+    gun_emb[WEAPON_REVOLVER].name = "gun_revolver";
+    gun_emb[WEAPON_REVOLVER].data = NULL;
+    gun_emb[WEAPON_REVOLVER].size = 0;
+#endif
+#if R3D_HAVE_EMBEDDED_GUN_MUSKET
+    gun_emb[WEAPON_MUSKET].name = "gun_musket";
+    gun_emb[WEAPON_MUSKET].data = gun_musket_gpm;
+    gun_emb[WEAPON_MUSKET].size = (size_t)gun_musket_gpm_size;
+#else
+    gun_emb[WEAPON_MUSKET].name = "gun_musket";
+    gun_emb[WEAPON_MUSKET].data = NULL;
+    gun_emb[WEAPON_MUSKET].size = 0;
+#endif
+
+    /* hero */
+    {
+        R3dEmbeddedModel emb = r3d_hero_embedded_model();
+        if (r3d_load_one_model(&s_gpm_hero, &s_gpm_hero_ok, "hero", &emb, true))
+            r3d_hero_configure(&s_gpm_hero);
+    }
+
+    /* zombie */
+    if (r3d_load_one_model(&s_gpm_zombie, &s_gpm_zombie_ok, "zombie",
+                           &zombie_emb, true)) {
+        float height = s_gpm_zombie.bbox_max.y - s_gpm_zombie.bbox_min.y;
+        s_zombie_model_scale = (height > 0.1f) ? (1.70f / height) : 0.93f;
+        s_zombie_bbox_min_y = s_gpm_zombie.bbox_min.y;
+        r3d_resolve_zombie_clips();
+        r3d_asset_log("zombie: height=%.2f scale=%.3f clips idle=%d walk=%d run=%d attack=%d hit=%d death=%d",
+                      height, s_zombie_model_scale, s_zombie_clip_idle,
+                      s_zombie_clip_walk, s_zombie_clip_run, s_zombie_clip_attack,
+                      s_zombie_clip_hit, s_zombie_clip_death);
+    }
+
+    /* guns (static).  The importer already scales them to real-world length
+     * (`scale` in assets/import/gun_*.json) and points the barrel along +Z, so
+     * the renderer only places/orients them. */
+    (void)gun_len;
+    for (w = 0; w < WEAPON_COUNT; w++) {
+        GpmModel *gm = &s_gpm_gun[w];
+        if (r3d_load_one_model(gm, &s_gpm_gun_ok[w], gun_names[w],
+                               &gun_emb[w], false)) {
+            s_gpm_gun_scale[w] = 1.0f;
+            s_gpm_gun_muzzle_local[w] = v3(
+                (gm->bbox_min.x + gm->bbox_max.x) * 0.5f,
+                (gm->bbox_min.y + gm->bbox_max.y) * 0.5f,
+                gm->bbox_max.z);
+            r3d_asset_log("gun[%d]:   bbox z=%.3f muzzle_z=%.3f", w,
+                          gm->bbox_max.z - gm->bbox_min.z,
+                          s_gpm_gun_muzzle_local[w].z);
+        }
+    }
+}
+
+/* Frees model storage (used by r3d_fini and the reload API). */
+static void r3d_assets_free(void)
+{
+    int w;
+    gpm_destroy(&s_gpm_hero);
+    gpm_destroy(&s_gpm_zombie);
+    for (w = 0; w < WEAPON_COUNT; w++)
+        gpm_destroy(&s_gpm_gun[w]);
+    s_gpm_hero_ok = false;
+    s_gpm_zombie_ok = false;
+    for (w = 0; w < WEAPON_COUNT; w++)
+        s_gpm_gun_ok[w] = false;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* imported hero                                                      */
+/* ------------------------------------------------------------------ */
+
+/* Calls the loader for procedural attachment meshes once the imported hero
+ * skeleton is known (they are built in model space around their bones). */
+static void r3d_build_wolf_attachments(MeshVertex *scratch, int scratch_cap)
+{
+    if (s_hero_bone_head < 0 && s_hero_bone_hips < 0)
+        return;
+    mesh_build_wolf_head(&s_wolf_head, &s_arena, scratch, scratch_cap);
+    mesh_build_wolf_tail(s_wolf_tail, &s_arena, scratch, scratch_cap);
+}
+
+/* Decides the hero clip from core state and advances the clocks. */
+static void hero_gpm_update_anim(const Player *player, bool idle_only)
+{
+    int clip;
+    float clip_time;
+
+    if (idle_only) {
+        clip = s_hero_clip_idle;
+        clip_time = s_title_clock * 0.35f;
+    } else if (!player->alive) {
+        clip = s_hero_clip_death;
+        s_hero_death_clock += s_draw_dt;
+        clip_time = s_hero_death_clock;
+    } else {
+        bool firing = player->muzzle_flash > 0.001f;
+        if (firing && !s_hero_was_firing)
+            s_hero_shoot_clock = 0.0f;
+        if (firing)
+            s_hero_shoot_clock += s_draw_dt;
+        s_hero_was_firing = firing;
+
+        if (firing && s_hero_clip_shoot >= 0) {
+            clip = s_hero_clip_shoot;
+            clip_time = s_hero_shoot_clock;
+        } else if (player->anim_speed > 1.15f && s_hero_clip_run >= 0) {
+            clip = s_hero_clip_run;
+            clip_time = player->anim_time;
+        } else if (player->anim_speed > 0.05f && s_hero_clip_walk >= 0) {
+            clip = s_hero_clip_walk;
+            clip_time = player->anim_time;
+        } else {
+            clip = s_hero_clip_idle;
+            clip_time = player->anim_time;
+        }
+    }
+
+    if (player->alive) {
+        s_hero_death_clock = 0.0f;
+        s_hero_was_alive = true;
+    } else if (s_hero_was_alive) {
+        s_hero_death_clock = 0.0f;
+        s_hero_was_alive = false;
+    }
+
+    skin_set_clip(&s_hero_skin, clip, clip_time);
+    skin_update(&s_hero_skin, s_draw_dt);
+}
+
+/* Wolf head + bushy tail, attached to the imported skeleton bones. */
+static void hero_gpm_draw_attachments(const C3D_Mtx *root_view, const C3D_Mtx *root)
+{
+    C3D_Mtx pose, attach, local, mv;
+    /* procedural part scale in model units, so it stays 1.8-m-relative */
+    float attach_scale = 1.0f / (s_hero_model_scale > 0.01f ? s_hero_model_scale : 1.0f);
+    int i;
+
+    /* --- head (wolf identity) ------------------------------------- */
+    if (s_wolf_head.vbo != NULL && s_hero_bone_head >= 0) {
+        mtx_from_floats(&pose, s_hero_skin.pose[s_hero_bone_head * 16]);
+        attach_local(&local, s_hero_head_rest,
+                     v3(0.0f, 0.105f, 0.020f), v3(0, 0, 0),
+                     attach_scale);
+        Mtx_Multiply(&attach, &pose, &local);
+        Mtx_Multiply(&mv, root_view, &attach);
+        draw_mesh_mv(&mv, &s_wolf_head, 1.0f, 1.0f, 1.0f, 0.0f);
+    }
+
+    /* --- tail: three segments hanging off the hips bone ------------ */
+    if (s_wolf_tail[0].vbo != NULL && s_hero_bone_hips >= 0) {
+        C3D_Mtx chain;
+        float sway = sinf(s_title_clock * 2.0f + (float)(s_hero_skin.model ? s_hero_skin.model->anim_count : 0)) * 0.15f;
+        float sway2 = sinf(s_title_clock * 1.7f + 1.3f) * 0.22f;
+
+        mtx_from_floats(&pose, s_hero_skin.pose[s_hero_bone_hips * 16]);
+        /* base: hips rest position, slightly behind/down */
+        attach_local(&chain, s_hero_hips_rest,
+                     v3(0.0f, -0.02f, -0.10f), v3(-6.0f, sway * 57.0f, 0.0f),
+                     attach_scale);
+        Mtx_Multiply(&attach, &pose, &chain);
+        Mtx_Multiply(&mv, root_view, &attach);
+        draw_mesh_mv(&mv, &s_wolf_tail[0], 1.0f, 1.0f, 1.0f, 0.0f);
+
+        for (i = 1; i < 3; i++) {
+            C3D_Mtx step;
+            float len = (i == 1) ? 0.17f : 0.15f;
+            float s = (i == 1) ? sway2 : -sway2 * 0.6f;
+            attach_local(&step, v3(0.0f, 0.0f, -len), v3(0, 0, 0),
+                         v3(s * 40.0f, 0.0f, 0.0f), 1.0f);
+            {
+                C3D_Mtx tmp;
+                Mtx_Multiply(&tmp, &attach, &step);
+                attach = tmp;
+            }
+            Mtx_Multiply(&mv, root_view, &attach);
+            draw_mesh_mv(&mv, &s_wolf_tail[i], 1.0f, 1.0f, 1.0f, 0.0f);
+        }
+    }
+    (void)root;
+}
+
+/* Full imported hero: skinned body + procedural wolf head/tail + gun. */
+static void hero_draw_gpm(const Player *player, const C3D_Mtx *view,
+                          bool idle_only, WeaponId weapon, Vec3 *muzzle)
+{
+    C3D_Mtx root, root_view, local, attach, mv, pose;
+    Vec3 pos = player->transform.pos;
+    float bob;
+    int count;
+
+    hero_gpm_update_anim(player, idle_only);
+
+    /* root: feet on the ground, model yaw ~ player yaw, scaled to 1.8 m */
+    bob = idle_only ? 0.0f : (clampf(player->anim_speed, 0.0f, 1.0f) * 0.0f);
+    Mtx_Identity(&root);
+    Mtx_Translate(&root, pos.x, pos.y + bob, pos.z, true);
+    Mtx_RotateY(&root, player->transform.yaw, true);
+    Mtx_Scale(&root, s_hero_model_scale, s_hero_model_scale, s_hero_model_scale);
+    /* lift so the model's lowest vertex sits at y=0 */
+    Mtx_Translate(&root, 0.0f, -s_hero_bbox_min_y, 0.0f, true);
+    Mtx_Multiply(&root_view, view, &root);
+
+    count = skin_vertices(&s_hero_skin, (SkinVertex *)s_hero_vbo, s_hero_vert_cap);
+    if (count > 0) {
+        C3D_CullFace(GPU_CULL_NONE);
+        s_skin_verts_frame += (unsigned)count;
+        s_skin_bones_frame += s_hero_skin.model ? s_hero_skin.model->bone_count : 0u;
+        s_skin_instances_frame++;
+        C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_u_model_view, &root_view);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_u_tint, 1.0f, 1.0f, 1.0f, 0.0f);
+        {
+            C3D_BufInfo *buf = C3D_GetBufInfo();
+            BufInfo_Init(buf);
+            BufInfo_Add(buf, s_hero_vbo, MESH_VERTEX_STRIDE, MESH_ATTR_COUNT,
+                        MESH_ATTR_PERMUTATION);
+        }
+        C3D_DrawElements(GPU_TRIANGLES, s_hero_index_count, C3D_UNSIGNED_SHORT,
+                         s_hero_ibo);
+        C3D_CullFace(GPU_CULL_BACK_CCW);
+        s_draw_calls++;
+        s_draw_verts += (unsigned)count;
+    }
+
+    hero_gpm_draw_attachments(&root_view, &root);
+
+    /* --- third-person gun on the wrist/hand bone ------------------ */
+    if (s_gpm_gun_ok[weapon] && s_gpm_gun_mesh[weapon].vbo != NULL) {
+        if (s_hero_bone_wrist >= 0) {
+            static const Vec3 tp_pos[WEAPON_COUNT] = {
+                { 0.0f, -0.02f, 0.060f },   /* flintlock */
+                { 0.0f, -0.02f, 0.055f },   /* revolver  */
+                { 0.0f, -0.03f, 0.220f },   /* musket    */
+            };
+            static const Vec3 tp_rot[WEAPON_COUNT] = {
+                { 0.0f, 0.0f, 0.0f },
+                { 0.0f, 0.0f, 0.0f },
+                { 0.0f, 0.0f, 0.0f },
+            };
+            float gs = s_gpm_gun_scale[weapon];
+            mtx_from_floats(&pose, s_hero_skin.pose[s_hero_bone_wrist * 16]);
+            attach_local(&local, s_hero_wrist_rest,
+                         v3(tp_pos[weapon].x, tp_pos[weapon].y, tp_pos[weapon].z),
+                         tp_rot[weapon], gs);
+            Mtx_Multiply(&attach, &pose, &local);
+            Mtx_Multiply(&mv, &root_view, &attach);
+            C3D_CullFace(GPU_CULL_NONE);
+            draw_mesh_mv(&mv, &s_gpm_gun_mesh[weapon], 1.0f, 1.0f, 1.0f, 0.10f);
+            C3D_CullFace(GPU_CULL_BACK_CCW);
+            if (muzzle != NULL) {
+                Vec3 ml = s_gpm_gun_muzzle_local[weapon];
+                C3D_FVec mp = Mtx_MultiplyFVecH(&attach,
+                                                FVec3_New(ml.x, ml.y, ml.z));
+                mp = Mtx_MultiplyFVecH(&root, FVec3_New(mp.x, mp.y, mp.z));
+                *muzzle = v3(mp.x, mp.y, mp.z);
+            }
+        } else {
+            /* no wrist bone: hang it at the right hip like the procedural rig */
+            attach_local(&local, v3(0.24f, 0.97f, 0.10f), v3(0, 0, 0),
+                         v3(0.0f, -9.0f, 0.0f), s_gpm_gun_scale[weapon]);
+            Mtx_Multiply(&mv, &root_view, &local);
+            C3D_CullFace(GPU_CULL_NONE);
+            draw_mesh_mv(&mv, &s_gpm_gun_mesh[weapon], 1.0f, 1.0f, 1.0f, 0.10f);
+            C3D_CullFace(GPU_CULL_BACK_CCW);
+            if (muzzle != NULL) {
+                C3D_FVec mp = Mtx_MultiplyFVecH(&mv, FVec3_New(0.0f, 0.02f, 0.3f));
+                *muzzle = v3(mp.x, mp.y, mp.z);
+            }
+        }
+    } else if (muzzle != NULL) {
+        /* procedural gun fallback: right hip, hero-space */
+        C3D_Mtx gun_world;
+        attach_local(&local, v3(0.33f, 0.99f, 0.06f), v3(0, 0, 0),
+                     v3(0.0f, 31.5f, -2.0f), 1.25f);
+        Mtx_Multiply(&gun_world, &root, &local);
+        Mtx_Multiply(&mv, view, &gun_world);
+        draw_mesh_mv(&mv, &s_weapons[weapon], 1.0f, 1.0f, 1.0f, 0.10f);
+        {
+            C3D_FVec mp = Mtx_MultiplyFVecH(&gun_world,
+                                            FVec3_New(0.0f, 0.028f, s_muzzle_z[weapon]));
+            *muzzle = v3(mp.x, mp.y, mp.z);
+        }
+    }
+    if (muzzle == NULL && s_gpm_gun_ok[weapon] && s_gpm_gun_mesh[weapon].vbo != NULL) {
+        /* draw-only path (title screen): nothing extra */
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* imported zombies                                                   */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    int   index;
+    float dist2;
+} ZDrawEntry;
+
+#define R3D_MAX_ZDRAWS MAX_ZOMBIES
+
+/* Picks the clip for a zombie state. */
+static void zombie_gpm_clip(const Zombie *z, int *clip, float *time)
+{
+    /* Core's anim_time already advances at a speed/type-dependent rate, but the
+     * imported clips are long (walk 4 s), so apply a small per-type gain for
+     * readability: shamblers/brutes read as deliberate, runners already fast. */
+    float gain = 1.15f;
+
+    switch (z->type) {
+    case ZOMBIE_RUNNER: gain = 1.0f; break;
+    case ZOMBIE_BRUTE:  gain = 1.05f; break;
+    default:            gain = 1.25f; break;
+    }
+
+    switch (z->state) {
+    case ZOMBIE_ATTACK:
+        *clip = s_zombie_clip_attack;
+        /* attack_timer runs down through the windup; anim_time also advances
+         * during the swing, so speed it up to land the strike in-step */
+        *time = z->anim_time * 1.8f;
+        break;
+    case ZOMBIE_STAGGER:
+        *clip = s_zombie_clip_hit;
+        *time = z->anim_time * 1.2f;
+        break;
+    case ZOMBIE_DYING:
+        *clip = s_zombie_clip_death;
+        *time = clampf(z->death_time, 0.0f, 1.0f) *
+                gpm_anim_duration(&s_gpm_zombie, s_zombie_clip_death);
+        break;
+    case ZOMBIE_IDLE:
+        *clip = s_zombie_clip_idle;
+        *time = z->anim_time * gain;
+        break;
+    default:
+        if (z->speed > 2.0f && s_zombie_clip_run >= 0) {
+            *clip = s_zombie_clip_run;
+        } else {
+            *clip = s_zombie_clip_walk;
+        }
+        *time = z->anim_time * gain;
+        break;
+    }
+}
+
+/* Builds the model matrix for one zombie (feet at z->pos, scaled per type). */
+static void zombie_gpm_model(C3D_Mtx *model, const Zombie *z)
+{
+    float height;
+    float scale;
+
+    switch (z->type) {
+    case ZOMBIE_RUNNER: height = 1.60f; break;
+    case ZOMBIE_BRUTE:  height = 2.30f; break;
+    default:            height = 1.70f; break;
+    }
+    scale = height / (s_gpm_zombie.bbox_max.y - s_gpm_zombie.bbox_min.y);
+    Mtx_Identity(model);
+    Mtx_Translate(model, z->pos.x, z->pos.y, z->pos.z, true);
+    Mtx_RotateY(model, z->yaw, true);
+    Mtx_Scale(model, scale, scale, scale);
+    Mtx_Translate(model, 0.0f, -s_zombie_bbox_min_y, 0.0f, true);
+    if (z->state == ZOMBIE_DYING) {
+        float k = clampf(z->death_time, 0.0f, 1.0f);
+        Mtx_Translate(model, 0.0f, -0.10f * k, 0.0f, true);
+        Mtx_RotateX(model, 1.40f * k, true);
+    }
+    (void)scale;
+}
+
+/* Tint per zombie type (the base GPM is shared until per-type models exist). */
+static void zombie_gpm_tint(const Zombie *z, float *r, float *g, float *b)
+{
+    *r = 1.0f;
+    *g = 1.0f;
+    *b = 1.0f;
+    switch (z->type) {
+    case ZOMBIE_RUNNER:
+        *r = 0.95f; *g = 1.02f; *b = 1.04f;
+        break;
+    case ZOMBIE_BRUTE:
+        *r = 1.18f; *g = 0.97f; *b = 0.88f;
+        break;
+    default:
+        break;
+    }
+    if (z->state == ZOMBIE_STAGGER) {
+        *r *= 1.5f;
+        *g *= 1.2f;
+        *b *= 1.1f;
+    } else if (z->state == ZOMBIE_DYING) {
+        float k = clampf(z->death_time, 0.0f, 1.0f);
+        *r *= 1.0f - 0.45f * k;
+        *g *= 1.0f - 0.45f * k;
+        *b *= 1.0f - 0.40f * k;
+    }
+}
+
+
+/* Draws one zombie from the shared far pose (no per-zombie skinning). */
+static void zombie_gpm_draw_far(const Zombie *z, const C3D_Mtx *view)
+{
+    C3D_Mtx model, mv;
+    float r, g, b;
+
+    zombie_gpm_model(&model, z);
+    zombie_gpm_tint(z, &r, &g, &b);
+    Mtx_Multiply(&mv, view, &model);
+    draw_mesh_mv(&mv, &(Mesh){ .vbo = s_zombie_far_vbo,
+                              .vertex_count = (uint32_t)s_zombie_vert_count },
+                 r, g, b, 0.0f);
+}
+
+/* Draws every zombie: nearest N fully skinned, the rest on one shared pose. */
+static void draw_zombies_gpm(const GraveGame *game, const C3D_Mtx *view,
+                             bool hero_visible)
+{
+    ZDrawEntry list[R3D_MAX_ZDRAWS];
+    int n = 0, i, j;
+    int budget = R3D_SKIN_BUDGET - (hero_visible ? s_hero_vert_cap : 0);
+    int slot = 0;
+    bool far_ready = false;
+    C3D_Mtx mv;
+    float cam_x = game->camera_pos.x;
+    s_zombie_far_clock += s_draw_dt;
+    float cam_z = game->camera_pos.z;
+
+    for (i = 0; i < MAX_ZOMBIES && n < R3D_MAX_ZDRAWS; i++) {
+        const Zombie *z = &game->zombies[i];
+        float dx, dz;
+        if (!z->active || z->state == ZOMBIE_DEAD)
+            continue;
+        if (!world_visible(view, z->pos, 2.0f))
+            continue;
+        dx = z->pos.x - cam_x;
+        dz = z->pos.z - cam_z;
+        list[n].index = i;
+        list[n].dist2 = dx * dx + dz * dz;
+        n++;
+    }
+
+    /* nearest first (insertion sort: n is small) */
+    for (i = 1; i < n; i++) {
+        ZDrawEntry e = list[i];
+        j = i - 1;
+        while (j >= 0 && list[j].dist2 > e.dist2) {
+            list[j + 1] = list[j];
+            j--;
+        }
+        list[j + 1] = e;
+    }
+
+    for (i = 0; i < n; i++) {
+        const Zombie *z = &game->zombies[list[i].index];
+        bool can_skin = (list[i].dist2 <= R3D_ZOMBIE_LOD_DIST * R3D_ZOMBIE_LOD_DIST) &&
+                        (slot < R3D_NEAR_ZOMBIES) &&
+                        (budget >= s_zombie_vert_count);
+        if (can_skin) {
+            int clip;
+            float clip_time;
+            int count;
+            SkinInstance *inst = &s_zombie_skin[slot];
+
+            if (!s_zombie_slot_inited[slot]) {
+                skin_init(inst, &s_gpm_zombie);
+                s_zombie_slot_inited[slot] = true;
+            }
+            zombie_gpm_clip(z, &clip, &clip_time);
+            skin_set_clip(inst, clip, clip_time);
+            skin_update(inst, s_draw_dt);
+            count = skin_vertices(inst, (SkinVertex *)s_zombie_vbo[slot],
+                                  s_zombie_vert_cap);
+            if (count > 0) {
+                s_skin_verts_frame += (unsigned)count;
+                s_skin_bones_frame += s_gpm_zombie.bone_count;
+                s_skin_instances_frame++;
+                float r, g, b;
+                C3D_Mtx model;
+                zombie_gpm_model(&model, z);
+                Mtx_Multiply(&mv, view, &model);
+                zombie_gpm_tint(z, &r, &g, &b);
+                C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_u_model_view, &mv);
+                C3D_FVUnifSet(GPU_VERTEX_SHADER, s_u_tint, r, g, b, 0.0f);
+                {
+                    C3D_BufInfo *buf = C3D_GetBufInfo();
+                    BufInfo_Init(buf);
+                    BufInfo_Add(buf, s_zombie_vbo[slot], MESH_VERTEX_STRIDE,
+                                MESH_ATTR_COUNT, MESH_ATTR_PERMUTATION);
+                }
+                C3D_CullFace(GPU_CULL_NONE);
+                C3D_DrawElements(GPU_TRIANGLES, s_zombie_index_count,
+                                 C3D_UNSIGNED_SHORT, s_zombie_ibo);
+                C3D_CullFace(GPU_CULL_BACK_CCW);
+                s_draw_calls++;
+                s_draw_verts += (unsigned)count;
+                budget -= s_zombie_vert_count;
+                slot++;
+            }
+            continue;
+        }
+
+        /* far / over-budget: shared pose, cheap */
+        if (!far_ready) {
+            if (!s_zombie_far_inited) {
+                skin_init(&s_zombie_far_skin, &s_gpm_zombie);
+                s_zombie_far_inited = true;
+            }
+            skin_set_clip(&s_zombie_far_skin, s_zombie_clip_walk,
+                          s_zombie_far_clock * 1.25f);
+            skin_update(&s_zombie_far_skin, s_draw_dt);
+            skin_vertices(&s_zombie_far_skin, (SkinVertex *)s_zombie_far_vbo,
+                          s_zombie_vert_cap);
+            s_skin_verts_frame += s_gpm_zombie.vertex_count;
+            s_skin_bones_frame += s_gpm_zombie.bone_count;
+            s_skin_instances_frame++;
+            far_ready = true;
+        }
+        zombie_gpm_draw_far(z, view);
+    }
+}
+
+/* Draws a single titled-diorama zombie through the skinned path (near). */
+static void zombie_gpm_draw_one(const Zombie *z, const C3D_Mtx *view, float clock)
+{
+    static SkinInstance inst;
+    static bool inited;
+    int clip = s_zombie_clip_walk;
+    float time = clock;
+    int count;
+    C3D_Mtx model, mv;
+    float r, g, b;
+
+    if (!inited) {
+        skin_init(&inst, &s_gpm_zombie);
+        inited = true;
+    }
+    if (z->state == ZOMBIE_ATTACK && s_zombie_clip_attack >= 0) {
+        clip = s_zombie_clip_attack;
+    }
+    skin_set_clip(&inst, clip, time * 1.25f);
+    skin_update(&inst, 1.0f / 60.0f);
+    count = skin_vertices(&inst, (SkinVertex *)s_zombie_vbo[0], s_zombie_vert_cap);
+    if (count <= 0)
+        return;
+    s_skin_verts_frame += (unsigned)count;
+    s_skin_bones_frame += s_gpm_zombie.bone_count;
+    s_skin_instances_frame++;
+    zombie_gpm_model(&model, z);
+    Mtx_Multiply(&mv, view, &model);
+    zombie_gpm_tint(z, &r, &g, &b);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_u_model_view, &mv);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_u_tint, r, g, b, 0.0f);
+    {
+        C3D_BufInfo *buf = C3D_GetBufInfo();
+        BufInfo_Init(buf);
+        BufInfo_Add(buf, s_zombie_vbo[0], MESH_VERTEX_STRIDE, MESH_ATTR_COUNT,
+                    MESH_ATTR_PERMUTATION);
+    }
+    C3D_CullFace(GPU_CULL_NONE);
+    C3D_DrawElements(GPU_TRIANGLES, s_zombie_index_count, C3D_UNSIGNED_SHORT,
+                     s_zombie_ibo);
+    C3D_CullFace(GPU_CULL_BACK_CCW);
+    s_draw_calls++;
+    s_draw_verts += (unsigned)count;
+}
+
+/* ------------------------------------------------------------------ */
+/* imported guns (first-person viewmodel)                             */
+/* ------------------------------------------------------------------ */
+
+/* Per-weapon first-person placement, tuned for the imported static GPMs. */
+static const Vec3 s_gpm_fp_pos[WEAPON_COUNT] = {
+    { 0.150f, -0.120f, -0.300f },
+    { 0.150f, -0.115f, -0.290f },
+    { 0.165f, -0.135f, -0.880f },
+};
+static const Vec3 s_gpm_fp_rot[WEAPON_COUNT] = {
+    { 0.0f, 180.0f, 0.0f },
+    { 0.0f, 180.0f, 0.0f },
+    { 0.0f, 180.0f, 0.0f },
+};
+
+static void draw_first_person_gun_gpm(const GraveGame *game, WeaponId weapon,
+                                      Vec3 *muzzle_out)
+{
+    const Player *p = &game->player;
+    float t = game->zone_time;
+    float sway_x = sinf(t * 1.9f) * 0.005f +
+                   clampf(p->anim_speed, 0.0f, 1.0f) * sinf(p->anim_time * 2.0f) * 0.006f;
+    float sway_y = cosf(t * 1.3f) * 0.004f;
+    float recoil = clampf(p->recoil, 0.0f, 0.25f);
+    float kick = clampf(p->muzzle_flash / R3D_MUZZLE_FLASH_TIME, 0.0f, 1.0f);
+    C3D_Mtx model;
+
+    Mtx_Identity(&model);
+    Mtx_Translate(&model,
+                  s_gpm_fp_pos[weapon].x + sway_x,
+                  s_gpm_fp_pos[weapon].y + sway_y,
+                  s_gpm_fp_pos[weapon].z + recoil * 0.5f + kick * 0.02f, true);
+    Mtx_RotateY(&model, deg2rad(s_gpm_fp_rot[weapon].y), true);
+    Mtx_RotateX(&model, deg2rad(s_gpm_fp_rot[weapon].x) + recoil * 1.6f + kick * 0.1f, true);
+    Mtx_RotateZ(&model, deg2rad(s_gpm_fp_rot[weapon].z) + sway_x * 0.6f, true);
+    Mtx_Scale(&model, s_gpm_gun_scale[weapon], s_gpm_gun_scale[weapon],
+              s_gpm_gun_scale[weapon]);
+    C3D_CullFace(GPU_CULL_NONE);
+    draw_mesh_mv(&model, &s_gpm_gun_mesh[weapon], 1.0f, 1.0f, 1.0f, 0.18f);
+    C3D_CullFace(GPU_CULL_BACK_CCW);
+
+    if (muzzle_out != NULL) {
+        Vec3 ml = s_gpm_gun_muzzle_local[weapon];
+        C3D_FVec mp = Mtx_MultiplyFVecH(&model, FVec3_New(ml.x, ml.y, ml.z));
+        *muzzle_out = v3(mp.x, mp.y, mp.z);  /* camera space for FP */
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* imported model helpers used by the rest of the renderer            */
+/* ------------------------------------------------------------------ */
+
+
+static void r3d_bake_gun_meshes(MeshVertex *scratch, int scratch_cap)
+{
+    int w;
+    for (w = 0; w < WEAPON_COUNT; w++) {
+        if (!s_gpm_gun_ok[w] || s_gpm_gun[w].data == NULL)
+            continue;
+        if (!gpm_bake_static_mesh(&s_gpm_gun_mesh[w], &s_gpm_gun[w],
+                                  scratch, scratch_cap)) {
+            r3d_asset_log("gun[%d]: static mesh bake failed", w);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* world drawing                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -1093,11 +2210,19 @@ static void draw_world_geometry(const GraveGame *game, const C3D_Mtx *view,
                                 Vec3 *muzzle_out, bool *muzzle_valid)
 {
     Vec3 muzzle;
+    Vec3 fp_muzzle_cam = v3(0.0f, 0.0f, 0.0f);
+    bool fp_muzzle_valid = false;
+    bool hero_visible = !first_person;
 
     /* first person: viewmodel goes in before the world so it is never clipped
      * into a wall (depth is already correct from the near camera position) */
     if (first_person) {
-        draw_first_person_gun(game, weapon);
+        if (s_gpm_gun_ok[weapon] && s_gpm_gun_mesh[weapon].vbo != NULL) {
+            draw_first_person_gun_gpm(game, weapon, &fp_muzzle_cam);
+            fp_muzzle_valid = true;
+        } else {
+            draw_first_person_gun(game, weapon);
+        }
     }
 
     /* distant hills: plain silhouettes, no culling assumptions */
@@ -1119,14 +2244,28 @@ static void draw_world_geometry(const GraveGame *game, const C3D_Mtx *view,
 
     /* weapon muzzle in the world, for flash + smoke */
     if (first_person) {
-        muzzle = weapon_muzzle_world(weapon, cam_pos, fwd, right, up);
+        if (fp_muzzle_valid) {
+            /* camera-space muzzle -> world */
+            muzzle = v3_add(*cam_pos, v3_scale(*right, fp_muzzle_cam.x));
+            muzzle = v3_add(muzzle, v3_scale(*up, fp_muzzle_cam.y));
+            muzzle = v3_add(muzzle, v3_scale(*fwd, -fp_muzzle_cam.z));
+        } else {
+            muzzle = weapon_muzzle_world(weapon, cam_pos, fwd, right, up);
+        }
+    } else if (s_gpm_hero_ready && !s_hero_rig_override) {
+        muzzle = v3_add(game->player.transform.pos, v3(0.0f, 1.2f, 0.0f));
+        hero_draw_gpm(&game->player, view, false, weapon, &muzzle);
     } else {
         muzzle = v3_add(game->player.transform.pos, v3(0.0f, 1.2f, 0.0f));
         hero_draw(&game->player, view, game->zone_time, false, weapon, &muzzle);
     }
 
     /* zombies */
-    draw_zombies(game, view);
+    if (s_gpm_zombie_ok && s_zombie_vbo[0] != NULL) {
+        draw_zombies_gpm(game, view, hero_visible);
+    } else {
+        draw_zombies(game, view);
+    }
 
     *muzzle_out = muzzle;
     *muzzle_valid = true;
@@ -1255,7 +2394,9 @@ static void draw_title_diorama(const GraveGame *game, const Vec3 *cam_pos,
         draw_prop_one(&p, i, view);
     }
 
-    if (rig != NULL) {
+    if (s_gpm_hero_ready && !s_hero_rig_override) {
+        hero_draw_gpm(&hero, view, true, WEAPON_REVOLVER, NULL);
+    } else if (rig != NULL) {
         hero_draw(&hero, view, s_title_clock, true, WEAPON_REVOLVER, NULL);
     }
 
@@ -1271,7 +2412,10 @@ static void draw_title_diorama(const GraveGame *game, const Vec3 *cam_pos,
                        hero.transform.pos.z - z.pos.z);
         z.anim_time = s_title_clock + zombies[i].phase;
         z.speed = 0.6f;
-        draw_zombie(&z, i + 2, view);
+        if (s_gpm_zombie_ok && s_zombie_vbo[0] != NULL)
+            zombie_gpm_draw_one(&z, view, z.anim_time);
+        else
+            draw_zombie(&z, i + 2, view);
     }
 
     /* drifting dust motes catch the light in the diorama */
@@ -1290,7 +2434,7 @@ static void draw_title_diorama(const GraveGame *game, const Vec3 *cam_pos,
 /* init / fini                                                        */
 /* ------------------------------------------------------------------ */
 
-static void build_meshes(MeshVertex *scratch, int scratch_cap)
+static void build_meshes(MeshVertex *scratch, int scratch_cap, bool skip_zombie_poses)
 {
     int i, t, p;
 
@@ -1301,11 +2445,16 @@ static void build_meshes(MeshVertex *scratch, int scratch_cap)
     mesh_build_props(s_props, &s_arena, scratch, scratch_cap);
     mesh_build_pickups(s_pickups, &s_arena, scratch, scratch_cap);
     mesh_build_weapons(s_weapons, &s_arena, scratch, scratch_cap);
-    mesh_build_zombie_poses(s_zombie_poses, &s_arena, scratch, scratch_cap);
+    /* The 33 baked zombie pose meshes are only the fallback when no imported
+     * zombie model could be loaded - skip them to save ~800 KB of arena when
+     * the GPM skinning path is active. */
+    if (!skip_zombie_poses)
+        mesh_build_zombie_poses(s_zombie_poses, &s_arena, scratch, scratch_cap);
     mesh_build_hero_rig(&s_hero_builtin, &s_arena, scratch, scratch_cap);
     mesh_build_unit_cube(&s_unit_cube, &s_arena, scratch, scratch_cap);
 
-    s_hero_rig = &s_hero_builtin;
+    if (s_hero_rig == NULL)
+        s_hero_rig = &s_hero_builtin;
 
     s_mesh_verts = s_ground.vertex_count + s_hills.vertex_count +
                    s_shadow.vertex_count + s_unit_cube.vertex_count;
@@ -1373,11 +2522,50 @@ void r3d_init(void)
     }
     mesh_arena_init(&s_arena, s_arena_mem, R3D_MESH_ARENA_BYTES);
 
+    /* Imported models decide which procedural fallbacks are needed. */
+    r3d_assets_init();
+
     scratch = (MeshVertex *)linearAlloc((size_t)R3D_SCRATCH_VERTS * sizeof(MeshVertex));
     if (scratch == NULL)
         return;
-    build_meshes(scratch, R3D_SCRATCH_VERTS);
+    build_meshes(scratch, R3D_SCRATCH_VERTS, s_gpm_zombie_ok);
+    if (s_gpm_hero_ok)
+        r3d_build_wolf_attachments(scratch, R3D_SCRATCH_VERTS);
+    r3d_bake_gun_meshes(scratch, R3D_SCRATCH_VERTS);
     linearFree(scratch);
+
+    /* skinning runtime (dynamic VBOs are separate linearAlloc buffers) */
+    s_gpm_hero_ready = false;
+    if (s_gpm_hero_ok && r3d_hero_buffers_alloc(&s_gpm_hero)) {
+        r3d_hero_configure(&s_gpm_hero);
+        s_gpm_hero_ready = true;
+    }
+    if (s_gpm_zombie_ok && r3d_alloc_skin_zombie()) {
+        int z;
+        for (z = 0; z < R3D_NEAR_ZOMBIES; z++)
+            s_zombie_slot_inited[z] = false;
+        s_zombie_far_inited = false;
+        skin_init(&s_zombie_far_skin, &s_gpm_zombie);
+        s_zombie_far_inited = true;
+    }
+
+    s_mesh_bytes = (unsigned)s_arena.used;
+
+    s_dynamic_bytes = 0;
+    if (s_hero_vbo != NULL)
+        s_dynamic_bytes += (unsigned)s_hero_vert_cap * (unsigned)sizeof(MeshVertex);
+    if (s_hero_ibo != NULL)
+        s_dynamic_bytes += (unsigned)s_hero_index_count * 2u;
+    if (s_zombie_ibo != NULL)
+        s_dynamic_bytes += (unsigned)s_zombie_index_count * 2u;
+    {
+        int z;
+        for (z = 0; z < R3D_NEAR_ZOMBIES; z++)
+            if (s_zombie_vbo[z] != NULL)
+                s_dynamic_bytes += (unsigned)s_zombie_vert_cap * (unsigned)sizeof(MeshVertex);
+        if (s_zombie_far_vbo != NULL)
+            s_dynamic_bytes += (unsigned)s_zombie_vert_cap * (unsigned)sizeof(MeshVertex);
+    }
 
     s_dyn_mem = linearAlloc((size_t)R3D_DYN_VERTS * sizeof(MeshVertex));
     s_dyn_verts = (MeshVertex *)s_dyn_mem;
@@ -1392,8 +2580,33 @@ void r3d_init(void)
 
 void r3d_fini(void)
 {
+    int i;
+
     if (!s_initialized)
         return;
+
+    /* dynamic skinned vertex buffers (linearAlloc'd separately from the arena) */
+    if (s_hero_vbo != NULL)
+        linearFree(s_hero_vbo);
+    s_hero_vbo = NULL;
+    if (s_hero_ibo != NULL)
+        linearFree(s_hero_ibo);
+    s_hero_ibo = NULL;
+    for (i = 0; i < R3D_NEAR_ZOMBIES; i++) {
+        if (s_zombie_vbo[i] != NULL)
+            linearFree(s_zombie_vbo[i]);
+        s_zombie_vbo[i] = NULL;
+        s_zombie_slot_inited[i] = false;
+    }
+    if (s_zombie_far_vbo != NULL)
+        linearFree(s_zombie_far_vbo);
+    s_zombie_far_vbo = NULL;
+    s_zombie_far_inited = false;
+    if (s_zombie_ibo != NULL)
+        linearFree(s_zombie_ibo);
+    s_zombie_ibo = NULL;
+    s_gpm_hero_ready = false;
+    r3d_assets_free();
 
     if (s_dyn_mem != NULL)
         linearFree(s_dyn_mem);
@@ -1402,6 +2615,7 @@ void r3d_fini(void)
     if (s_arena_mem != NULL)
         linearFree(s_arena_mem);
     s_arena_mem = NULL;
+    memset(&s_arena, 0, sizeof(s_arena));
 
     if (s_dvlb != NULL) {
         shaderProgramFree(&s_program);
@@ -1524,6 +2738,10 @@ void r3d_draw_world(const GraveGame *game, float dt)
 
     s_draw_calls = 0;
     s_draw_verts = 0;
+    s_skin_verts_frame = 0;
+    s_skin_bones_frame = 0;
+    s_skin_instances_frame = 0;
+    s_draw_dt = dt;
 
     title = game != NULL && game->phase == GAME_PHASE_TITLE;
     if (title)
@@ -1610,9 +2828,77 @@ unsigned r3d_mesh_vertices(void)
     return s_mesh_verts;
 }
 
+void r3d_frame_stats_ext(R3dFrameStats *out)
+{
+    if (out == NULL)
+        return;
+    out->draw_calls = s_draw_calls;
+    out->draw_verts = s_draw_verts;
+    out->skinned_verts = s_skin_verts_frame;
+    out->skinned_bones = s_skin_bones_frame;
+    out->skinned_instances = s_skin_instances_frame;
+    out->mesh_arena_bytes = s_mesh_bytes;
+    out->dynamic_bytes = s_dynamic_bytes;
+}
+
 void r3d_set_hero_rig(const struct HeroRig *rig)
 {
     s_hero_rig = (rig == NULL) ? &s_hero_builtin : rig;
+    s_hero_rig_override = (rig != NULL);
+}
+
+/* ------------------------------------------------------------------ */
+/* imported-model hot swap (v0.2)                                     */
+/* ------------------------------------------------------------------ */
+
+static const GpmModel *s_hero_model_borrowed;
+
+bool r3d_set_hero_model(const struct GpmModel *model)
+{
+    if (!s_initialized)
+        return false;
+    if (model == NULL)
+        return r3d_reload_hero_model();
+    if (!gpm_is_skinned(model) || model->vertex_count == 0 ||
+        model->vertex_count > R3D_MAX_MODEL_VERTS)
+        return false;
+    if (!r3d_hero_buffers_alloc(model))
+        return false;
+    s_hero_model_borrowed = model;
+    r3d_hero_configure(model);
+    s_gpm_hero_ready = true;
+    r3d_asset_log("hero: hot-swapped to caller model (%u verts)",
+                  model->vertex_count);
+    return true;
+}
+
+bool r3d_reload_hero_model(void)
+{
+    R3dEmbeddedModel emb;
+
+    if (!s_initialized)
+        return false;
+    s_hero_model_borrowed = NULL;
+    s_gpm_hero_ready = false;
+    gpm_destroy(&s_gpm_hero);
+    s_gpm_hero_ok = false;
+    emb = r3d_hero_embedded_model();
+    if (!r3d_load_one_model(&s_gpm_hero, &s_gpm_hero_ok, "hero", &emb, true))
+        return false;
+    if (!r3d_hero_buffers_alloc(&s_gpm_hero))
+        return false;
+    r3d_hero_configure(&s_gpm_hero);
+    s_gpm_hero_ready = true;
+    return true;
+}
+
+const struct GpmModel *r3d_hero_model(void)
+{
+    if (!s_gpm_hero_ready)
+        return NULL;
+    if (s_hero_model_borrowed != NULL)
+        return s_hero_model_borrowed;
+    return s_hero_skin.model;
 }
 
 /* ------------------------------------------------------------------ */

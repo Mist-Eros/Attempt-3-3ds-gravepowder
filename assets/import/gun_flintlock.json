@@ -1,7 +1,8 @@
 {
   "kind": "weapon",
   "source": "assets/models/gun_flintlock.glb",
-  "scale": 1.0,
+  "credit": "Quaternius Pistol - CC0 - https://poly.pizza/m/ldAlSSvuqT",
+  "scale": 0.45,
   "yaw": 0.0,
   "animations": {},
   "resample_hz": 0,

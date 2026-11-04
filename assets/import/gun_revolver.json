@@ -1,7 +1,8 @@
 {
   "kind": "weapon",
   "source": "assets/models/gun_revolver.glb",
-  "scale": 1.0,
+  "credit": "Revolver - CC-BY 3.0 - https://poly.pizza/m/fGBhJzY228W",
+  "scale": 0.40,
   "yaw": 0.0,
   "animations": {},
   "resample_hz": 0,

@@ -1,7 +1,8 @@
 {
   "kind": "weapon",
   "source": "assets/models/gun_musket.glb",
-  "scale": 1.0,
+  "credit": "Quaternius Rifle - CC0 - https://poly.pizza/m/neEjwx9bBJ",
+  "scale": 1.30,
   "yaw": 0.0,
   "animations": {},
   "resample_hz": 0,

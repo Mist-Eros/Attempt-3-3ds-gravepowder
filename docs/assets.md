@@ -7,7 +7,7 @@ missing or broken asset file just falls back.
 ## TL;DR for swapping a model
 
 1. Put a `.glb` (glTF binary) model in this folder.
-2. `python tools/import_model.py assets/models/mymodel.glb --kind hero --config assets/import/hero.json --out build/hero.gpm`
+2. `pip install pygltflib numpy Pillow` once, then `python tools/import_model.py assets/models/mymodel.glb --kind hero --config assets/import/hero.json --out build/hero.gpm`
 3. Copy `build/hero.gpm` to `sdmc:/3ds/Gravepowder/models/hero.gpm` on the SD card.
 4. Boot the game — it loads the SD model if present, otherwise the embedded one.
 

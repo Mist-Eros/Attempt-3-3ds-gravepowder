@@ -706,6 +706,33 @@ void mesh_build_pickups(Mesh out[DROP_COUNT], MeshArena *arena,
     mesh_builder_cyl(&b, &id, 0.0f, 0.175f, 0.0f, 0.012f, 0.03f, 5, true,
                      pouch_brass[0], pouch_brass[1], pouch_brass[2]);
     (void)mesh_commit(&b, &out[DROP_AMMO], arena);
+
+    /* DROP_BONE_CHARM: bone-white charm with a red glint (Bone Orchard quest) */
+    {
+        const float bone_white[3] = { 0.90f, 0.86f, 0.74f };
+        const float bone_shadow[3] = { 0.62f, 0.58f, 0.48f };
+        const float charm_red[3] = { 1.00f, 0.18f, 0.14f };
+
+        mesh_builder_begin(&b, scratch, scratch_cap);
+        xf_reset(&id);
+        /* little end-bone with two knobs, standing upright */
+        mesh_builder_box(&b, &id, 0.0f, 0.105f, 0.0f, 0.020f, 0.070f, 0.020f,
+                         bone_white[0], bone_white[1], bone_white[2]);
+        mesh_builder_box(&b, &id, -0.032f, 0.168f, 0.0f, 0.030f, 0.024f, 0.024f,
+                         bone_white[0], bone_white[1], bone_white[2]);
+        mesh_builder_box(&b, &id, 0.032f, 0.168f, 0.0f, 0.030f, 0.024f, 0.024f,
+                         bone_white[0], bone_white[1], bone_white[2]);
+        mesh_builder_box(&b, &id, 0.0f, 0.045f, 0.0f, 0.052f, 0.018f, 0.020f,
+                         bone_shadow[0], bone_shadow[1], bone_shadow[2]);
+        /* rawhide wrap + glowing red charm gem */
+        mesh_builder_box(&b, &id, 0.0f, 0.092f, 0.0f, 0.026f, 0.014f, 0.026f,
+                         charm_red[0] * 0.5f, charm_red[1] * 0.5f, charm_red[2] * 0.5f);
+        mesh_builder_quad(&b, &id, 0.0f, 0.100f, 0.024f, 0.020f, 0.020f,
+                          charm_red[0], charm_red[1], charm_red[2]);
+        mesh_builder_quad(&b, &id, 0.0f, 0.100f, -0.024f, 0.020f, 0.020f,
+                          charm_red[0], charm_red[1], charm_red[2]);
+        (void)mesh_commit(&b, &out[DROP_BONE_CHARM], arena);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1072,6 +1099,82 @@ static void hero_tail_seg(MeshBuilder *b, C3D_Mtx *id,
     mesh_builder_box(b, id, 0.0f, cy, cz, hx, hy, hz, col[0], col[1], col[2]);
 }
 
+/* ------------------------------------------------------------------ */
+/* wolf head / tail attachments (imported-body hero)                  */
+/* ------------------------------------------------------------------ */
+
+void mesh_build_wolf_head(Mesh *out, MeshArena *arena,
+                          MeshVertex *scratch, int scratch_cap)
+{
+    MeshBuilder b;
+    C3D_Mtx id, m;
+    int side;
+
+    mesh_builder_begin(&b, scratch, scratch_cap);
+    xf_reset(&id);
+
+    /* skull + snout */
+    mesh_builder_box(&b, &id, 0.0f, 0.0f, 0.0f, 0.105f, 0.095f, 0.10f,
+                     H_FUR[0], H_FUR[1], H_FUR[2]);
+    mesh_builder_box(&b, &id, 0.0f, -0.028f, 0.135f, 0.060f, 0.045f, 0.090f,
+                     H_CREAM[0], H_CREAM[1], H_CREAM[2]);
+    mesh_builder_box(&b, &id, 0.0f, -0.008f, 0.222f, 0.026f, 0.020f, 0.018f,
+                     H_NOSE[0], H_NOSE[1], H_NOSE[2]);
+    mesh_builder_box(&b, &id, 0.0f, -0.082f, 0.10f, 0.045f, 0.020f, 0.060f,
+                     H_CREAM_DARK[0], H_CREAM_DARK[1], H_CREAM_DARK[2]);
+
+    for (side = -1; side <= 1; side += 2) {
+        xf_reset(&m);
+        Mtx_Translate(&m, 0.082f * (float)side, 0.100f, -0.02f, true);
+        Mtx_RotateZ(&m, -0.22f * (float)side, true);
+        mesh_builder_cone(&b, &m, 0.0f, 0.0f, 0.0f, 0.052f, 0.0f, 0.17f, 3, true,
+                          H_FUR[0], H_FUR[1], H_FUR[2]);
+        mesh_builder_cone(&b, &m, 0.0f, 0.012f, 0.014f, 0.030f, 0.0f, 0.11f, 3, true,
+                          H_CREAM_DARK[0], H_CREAM_DARK[1], H_CREAM_DARK[2]);
+        /* amber eyes + dark brows */
+        mesh_builder_quad(&b, &id, 0.052f * (float)side, 0.020f, 0.101f,
+                          0.020f, 0.013f,
+                          H_EYE[0], H_EYE[1], H_EYE[2]);
+        mesh_builder_box(&b, &id, 0.052f * (float)side, 0.046f, 0.10f,
+                         0.028f, 0.011f, 0.012f,
+                         H_FUR_DARK[0], H_FUR_DARK[1], H_FUR_DARK[2]);
+    }
+
+    /* battered hat */
+    mesh_builder_cyl(&b, &id, 0.0f, 0.110f, -0.005f, 0.168f, 0.022f, 10, true,
+                     H_HAT[0], H_HAT[1], H_HAT[2]);
+    mesh_builder_cyl(&b, &id, 0.0f, 0.125f, -0.005f, 0.108f, 0.030f, 8, false,
+                     H_HATBAND[0], H_HATBAND[1], H_HATBAND[2]);
+    mesh_builder_cone(&b, &id, 0.0f, 0.185f, -0.005f, 0.107f, 0.090f, 0.115f, 8,
+                      true, H_HAT[0], H_HAT[1], H_HAT[2]);
+
+    (void)mesh_commit(&b, out, arena);
+}
+
+void mesh_build_wolf_tail(Mesh out[3], MeshArena *arena,
+                          MeshVertex *scratch, int scratch_cap)
+{
+    MeshBuilder b;
+    C3D_Mtx id;
+    int i;
+
+    static const float seg_half[3][3] = {
+        { 0.070f, 0.070f, 0.110f },
+        { 0.100f, 0.100f, 0.100f },
+        { 0.065f, 0.065f, 0.085f },
+    };
+
+    for (i = 0; i < 3; i++) {
+        mesh_builder_begin(&b, scratch, scratch_cap);
+        xf_reset(&id);
+        mesh_builder_box(&b, &id, 0.0f, 0.0f, -seg_half[i][2],
+                         seg_half[i][0], seg_half[i][1], seg_half[i][2],
+                         (i == 2) ? H_CREAM[0] : H_FUR[0],
+                         (i == 2) ? H_CREAM[1] : H_FUR[1],
+                         (i == 2) ? H_CREAM[2] : H_FUR[2]);
+        (void)mesh_commit(&b, &out[i], arena);
+    }
+}
 void mesh_build_hero_rig(HeroRig *rig, MeshArena *arena,
                          MeshVertex *scratch, int scratch_cap)
 {
