@@ -33,6 +33,7 @@ const char *grave_zone_name(ZoneId zone)
     switch (zone) {
     case ZONE_ASHEN_MILL:  return "ASHEN MILL";
     case ZONE_BONE_ORCHARD:return "BONE ORCHARD";
+    case ZONE_OLD_MINE:    return "OLD MINE";
     default:               return "THE WILDS";
     }
 }
@@ -40,10 +41,11 @@ const char *grave_zone_name(ZoneId zone)
 const char *grave_drop_name(GraveDrop drop)
 {
     switch (drop) {
-    case DROP_COIN:  return "OLD COIN";
-    case DROP_SINEW: return "ROT SINEW";
-    case DROP_AMMO:  return "POWDER";
-    default:         return "";
+    case DROP_COIN:       return "OLD COIN";
+    case DROP_SINEW:      return "ROT SINEW";
+    case DROP_AMMO:       return "POWDER";
+    case DROP_BONE_CHARM: return "BONE CHARM";
+    default:              return "";
     }
 }
 
@@ -73,15 +75,34 @@ const ZombieSpec *grave_zombie_spec(ZombieType type)
 /* ------------------------------------------------------------------ */
 /* zone tuning                                                        */
 /*                                                                    */
-/* ASHEN MILL is the v0.1 yard: ~3 minutes of shooting to clear the   */
-/* kill step plus the coin/sinew collection step.  BONE ORCHARD is a  */
-/* v0.2 placeholder using the same arena builder for now.             */
+/* Every zone runs the same generic quest ladder:                     */
+/*   QUEST_CLEAR_ZONE  -> kill `kill_goal` zombies                    */
+/*   QUEST_COLLECT     -> material_a, goal_a                          */
+/*   QUEST_COLLECT     -> material_b, goal_b                          */
+/* The drop cycle guarantees the quotas: per 4 kills a zombie drops    */
+/* [A, B, A, (powder|A)], so `kill_goal` kills always drop far more A  */
+/* and B than the collect steps ask for.                              */
+/*                                                                    */
+/* ASHEN MILL v0.1/v0.2   : 40 kills, 8 coins + 4 sinew               */
+/* BONE ORCHARD v0.2      : 55 kills, 10 coins + 6 bone charms, a      */
+/*                          brute in every wave, runner-heavy          */
+/* OLD MINE v0.2 stub     : spec only; its layout is still the mill    */
 /* ------------------------------------------------------------------ */
 
 static const ZoneSpec zone_table[ZONE_COUNT] = {
-    /* half  budget kills alive wave  coin sinew */
-    [ZONE_ASHEN_MILL]   = { 20.0f, 48, 40, 8, 2.8f, 8, 4 },
-    [ZONE_BONE_ORCHARD] = { 20.0f, 70, 58, 8, 2.8f, 10, 5 },
+    /* half  budget kills alive wave  matA        goalA matB         goalB */
+    [ZONE_ASHEN_MILL] = {
+        20.0f, 48, 40, 8, 2.8f, DROP_COIN, 8, DROP_SINEW, 4,
+        /* brute/wave runner% brute% layout */ 0, 0.37f, 0.18f, ZONE_LAYOUT_ASHEN_MILL,
+    },
+    [ZONE_BONE_ORCHARD] = {
+        20.0f, 64, 55, 8, 3.0f, DROP_COIN, 10, DROP_BONE_CHARM, 6,
+        1, 0.55f, 0.20f, ZONE_LAYOUT_BONE_ORCHARD,
+    },
+    [ZONE_OLD_MINE] = {
+        20.0f, 60, 50, 8, 3.0f, DROP_COIN, 12, DROP_SINEW, 6,
+        0, 0.40f, 0.20f, ZONE_LAYOUT_OLD_MINE,
+    },
 };
 
 const ZoneSpec *grave_zone_spec(ZoneId zone)

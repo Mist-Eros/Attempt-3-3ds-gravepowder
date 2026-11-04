@@ -1,11 +1,12 @@
 /*
- * Gravepowder - headless gameplay sim (balance + integration harness)
+ * Gravepowder - headless gameplay sim (v0.2: valley campaign + balance)
  *
  * Runs the real portable core with a scripted "player bot": walk toward the
  * nearest zombie, aim, shoot when roughly on target, reload, collect drops.
- * Runs ASHEN MILL start-to-finish in both camera modes, then an idle run to
- * show how long a player who does nothing survives.  No graphics, no audio,
- * no 3DS headers - this is how the balance gets tuned without the hardware.
+ * Plays ASHEN MILL -> trail -> BONE ORCHARD as one campaign (exercising the
+ * zone-unlock progression and the persistent inventory), then an idle run to
+ * show how fast a player who does nothing dies.  No graphics, no audio, no
+ * 3DS headers - this is how the balance gets tuned without the hardware.
  *
  *   make -C tools CC="D:/tools/zig/zig.exe cc" run
  */
@@ -19,21 +20,17 @@
 #include "core_internal.h"
 
 #define SIM_DT        (1.0f / 60.0f)
-#define SIM_MAX_STEPS (60 * 300) /* give up after 5 simulated minutes */
+#define SIM_MAX_STEPS (60 * 300) /* give up on a zone after 5 simulated minutes */
 #define SIM_SEED      2024u
-
-typedef struct {
-    const char *label;
-    bool first_person;
-    bool idle;
-} SimScenario;
 
 typedef struct {
     int steps;
     float time;
     int kills;
+    int kill_goal;
     int coins;
     int sinew;
+    int bone_charms;
     int shots;
     int hits;
     int pickups;
@@ -71,12 +68,22 @@ static float dist_xz(Vec3 a, Vec3 b)
 }
 
 /* Target selection: closest threat, but runners (the fast ones that actually
- * catch a kiting player) get priority, and brutes are picked last. */
+ * catch a kiting player) get priority.  Brutes are the slow wall, so they are
+ * picked last - unless enough of them have piled up that clearing the wall is
+ * the only way to make room for the rest of the wave. */
 static int nearest_zombie(const GraveGame *g, float *dist_out)
 {
     int best = -1;
     float best_score = 1.0e9f;
     float best_d = 1.0e9f;
+    int brutes = 0;
+
+    for (int i = 0; i < MAX_ZOMBIES; i++) {
+        const Zombie *z = &g->zombies[i];
+        if (z->active && z->state != ZOMBIE_DYING && z->state != ZOMBIE_DEAD &&
+            z->type == ZOMBIE_BRUTE)
+            brutes++;
+    }
     for (int i = 0; i < MAX_ZOMBIES; i++) {
         const Zombie *z = &g->zombies[i];
         float d;
@@ -88,7 +95,7 @@ static int nearest_zombie(const GraveGame *g, float *dist_out)
         if (z->type == ZOMBIE_RUNNER)
             score -= 2.5f;
         else if (z->type == ZOMBIE_BRUTE)
-            score += 4.0f;
+            score += (brutes >= 3) ? -1.0f : 4.0f;
         else
             score += 1.5f;
         if (score < best_score) {
@@ -99,20 +106,6 @@ static int nearest_zombie(const GraveGame *g, float *dist_out)
     }
     *dist_out = best_d;
     return best;
-}
-
-/* How many zombies are uncomfortably close right now? */
-static int zombies_within(const GraveGame *g, float radius)
-{
-    int n = 0;
-    for (int i = 0; i < MAX_ZOMBIES; i++) {
-        const Zombie *z = &g->zombies[i];
-        if (!z->active || z->state == ZOMBIE_DYING || z->state == ZOMBIE_DEAD)
-            continue;
-        if (dist_xz(z->pos, g->player.transform.pos) < radius)
-            n++;
-    }
-    return n;
 }
 
 static int nearest_pickup(const GraveGame *g, float *dist_out)
@@ -132,6 +125,19 @@ static int nearest_pickup(const GraveGame *g, float *dist_out)
     }
     *dist_out = best_d;
     return best;
+}
+
+static int zombies_within(const GraveGame *g, float radius)
+{
+    int n = 0;
+    for (int i = 0; i < MAX_ZOMBIES; i++) {
+        const Zombie *z = &g->zombies[i];
+        if (!z->active || z->state == ZOMBIE_DYING || z->state == ZOMBIE_DEAD)
+            continue;
+        if (dist_xz(z->pos, g->player.transform.pos) < radius)
+            n++;
+    }
+    return n;
 }
 
 /* Turn the touch-look input toward a world target; reports how far off the
@@ -246,62 +252,58 @@ static void sim_think(const GraveGame *g, GraveInput *in, SimBrain *brain)
     apply_unstick(brain, in);
 }
 
-static SimResult run_scenario(SimScenario sc)
+/* Plays the currently-started zone.  The app layer owns weapon/menu buttons, so
+ * the bot "presses" them by writing the authoritative player fields, just like
+ * app.c does. */
+static SimResult run_zone(GraveGame *g, const char *label, bool idle)
 {
-    GraveGame g;
-    GraveInput in;
     SimBrain brain;
     SimResult res;
-    int kill_goal;
+    int kill_goal = g->spawn_kill_goal;
 
     memset(&res, 0, sizeof(res));
     memset(&brain, 0, sizeof(brain));
     brain.strafe_dir = 1.0f;
+    res.kill_goal = kill_goal;
     res.t_kill_goal = -1.0f;
     res.t_quest_done = -1.0f;
 
-    grave_game_init(&g, SIM_SEED);
-    grave_game_start_zone(&g, ZONE_ASHEN_MILL);
-    /* the app layer owns weapon/camera-mode buttons, so the bot "presses"
-     * them by writing the authoritative player fields, just like app.c */
-    g.player.weapon = WEAPON_REVOLVER;
-    g.player.reload_weapon = WEAPON_REVOLVER;
-    g.player.camera_first_person = sc.first_person;
-    kill_goal = g.spawn_kill_goal;
+    g->player.weapon = WEAPON_REVOLVER;
+    g->player.reload_weapon = WEAPON_REVOLVER;
 
-    printf("[%s] seed=%u zone=%s\n", sc.label, (unsigned)SIM_SEED,
-           grave_zone_name(g.zone));
+    printf("[%s] zone=%s goal=%d kills\n", label,
+           grave_zone_name(g->zone), kill_goal);
 
     for (int i = 0; i < SIM_MAX_STEPS; i++) {
-        GraveInput *pin = &in;
-        Vec3 before = g.player.transform.pos;
+        GraveInput in;
+        Vec3 before = g->player.transform.pos;
         float moved;
         uint32_t events;
 
-        if (sc.idle)
+        if (idle)
             grave_input_reset(&in);
         else
-            sim_think(&g, &in, &brain);
+            sim_think(g, &in, &brain);
 
-        grave_game_step(&g, pin, SIM_DT);
-        grave_update_camera(&g, 5.0f / 3.0f);
+        grave_game_step(g, &in, SIM_DT);
+        grave_update_camera(g, 5.0f / 3.0f);
 
-        events = g.events;
-        g.events = 0u; /* what app.c does after dispatching to audio/UI */
+        events = g->events;
+        g->events = 0u; /* what app.c does after dispatching to audio/UI */
         if (events & GRAVE_EVT_SHOOT) res.shots++;
         if (events & GRAVE_EVT_HIT) res.hits++;
         if (events & GRAVE_EVT_PICKUP) res.pickups++;
         if (events & GRAVE_EVT_RELOAD) res.reloads++;
 
-        if (res.t_kill_goal < 0.0f && g.zombies_killed >= kill_goal)
-            res.t_kill_goal = g.zone_time;
+        if (res.t_kill_goal < 0.0f && g->zombies_killed >= kill_goal)
+            res.t_kill_goal = g->zone_time;
 
-        if (active_zombies(&g) > res.max_alive)
-            res.max_alive = active_zombies(&g);
+        if (active_zombies(g) > res.max_alive)
+            res.max_alive = active_zombies(g);
 
         /* unstick bookkeeping (bot only) */
-        if (!sc.idle && i > 0) {
-            moved = dist_xz(before, g.player.transform.pos);
+        if (!idle && i > 0) {
+            moved = dist_xz(before, g->player.transform.pos);
             if (brain.strafe_frames > 0) {
                 brain.strafe_frames--;
             } else if ((in.move_x != 0.0f || in.move_y != 0.0f) && moved < 0.015f) {
@@ -317,47 +319,50 @@ static SimResult run_scenario(SimScenario sc)
         }
 
         /* every 10 simulated seconds: one balance log line */
-        if (!sc.idle && (i % 600) == 0) {
+        if (!idle && (i % 600) == 0) {
             printf("  t=%5.1fs kills=%2d/%-2d alive=%2d hp=%5.1f "
-                   "coins=%2d sinew=%2d stage=%d\n",
-                   (double)g.zone_time, g.zombies_killed, kill_goal,
-                   active_zombies(&g), (double)g.player.hp,
-                   g.material_coins, g.material_sinew, (int)g.quest.kind);
+                   "coins=%2d sinew=%2d charms=%2d stage=%d\n",
+                   (double)g->zone_time, g->zombies_killed, kill_goal,
+                   active_zombies(g), (double)g->player.hp,
+                   g->run_materials[DROP_COIN], g->run_materials[DROP_SINEW],
+                   g->run_materials[DROP_BONE_CHARM], (int)g->quest.kind);
         }
 
-        if (g.phase == GAME_PHASE_QUEST_COMPLETE) {
+        if (g->phase == GAME_PHASE_QUEST_COMPLETE) {
             res.quest_done = true;
-            res.t_quest_done = g.zone_time;
+            res.t_quest_done = g->zone_time;
             break;
         }
-        if (g.phase == GAME_PHASE_GAME_OVER) {
+        if (g->phase == GAME_PHASE_GAME_OVER) {
             res.died = true;
             break;
         }
     }
 
-    res.steps = (int)(g.zone_time * 60.0f + 0.5f);
-    res.time = g.zone_time;
-    res.kills = g.zombies_killed;
-    res.coins = g.material_coins;
-    res.sinew = g.material_sinew;
-    res.hp = g.player.hp;
+    res.steps = (int)(g->zone_time * 60.0f + 0.5f);
+    res.time = g->zone_time;
+    res.kills = g->zombies_killed;
+    res.coins = g->run_materials[DROP_COIN];
+    res.sinew = g->run_materials[DROP_SINEW];
+    res.bone_charms = g->run_materials[DROP_BONE_CHARM];
+    res.hp = g->player.hp;
     return res;
 }
 
 static void print_result(const char *label, const SimResult *r, bool idle)
 {
     if (idle) {
-        printf("[%s] %s after %.1fs  hp=%.0f kills=%d alive=%d\n",
+        printf("[%s] %s after %.1fs  hp=%.0f kills=%d\n",
                label, r->died ? "DIED" : "SURVIVED",
-               (double)r->time, (double)r->hp, r->kills, 0);
+               (double)r->time, (double)r->hp, r->kills);
         return;
     }
-    printf("[%s] %s in %.1fs  kills=%d shots=%d hits=%d reloads=%d "
-           "drops=%d (coins=%d sinew=%d) pickups=%d hp=%.0f/%.0f\n",
+    printf("[%s] %s in %.1fs  kills=%d/%d shots=%d hits=%d reloads=%d "
+           "run drops=%d (coins=%d sinew=%d charms=%d) pickups=%d hp=%.0f/%.0f\n",
            label, r->quest_done ? "QUEST COMPLETE" : (r->died ? "DIED" : "TIMEOUT"),
-           (double)r->time, r->kills, r->shots, r->hits, r->reloads,
-           r->coins + r->sinew, r->coins, r->sinew, r->pickups,
+           (double)r->time, r->kills, r->kill_goal, r->shots, r->hits,
+           r->reloads, r->coins + r->sinew + r->bone_charms,
+           r->coins, r->sinew, r->bone_charms, r->pickups,
            (double)r->hp, (double)GRAVE_PLAYER_MAX_HP);
     if (r->t_kill_goal >= 0.0f)
         printf("      kill step done at %.1fs", (double)r->t_kill_goal);
@@ -366,49 +371,82 @@ static void print_result(const char *label, const SimResult *r, bool idle)
     printf(", peak zombies on field=%d\n", r->max_alive);
 }
 
+static void print_world(const GraveGame *g)
+{
+    printf("      world: in_zone=%d current=%s cleared=[%d %d %d] "
+           "unlocked=[%d %d %d]\n",
+           (int)g->world.in_zone, grave_zone_name(g->world.current),
+           (int)g->world.nodes[ZONE_ASHEN_MILL].cleared,
+           (int)g->world.nodes[ZONE_BONE_ORCHARD].cleared,
+           (int)g->world.nodes[ZONE_OLD_MINE].cleared,
+           (int)g->world.nodes[ZONE_ASHEN_MILL].unlocked,
+           (int)g->world.nodes[ZONE_BONE_ORCHARD].unlocked,
+           (int)g->world.nodes[ZONE_OLD_MINE].unlocked);
+    printf("      inventory: coins=%d sinew=%d bone-charms=%d kills-total=%d "
+           "zones-run=%d playtime=%.1fs\n",
+           g->material_coins, g->material_sinew, g->material_bone_charms,
+           g->total_kills, g->zone_runs, (double)g->total_time);
+}
+
 int main(void)
 {
-    SimScenario scenarios[3];
-    SimResult results[3];
+    GraveGame g;
+    SimResult ashen;
+    SimResult orchard;
+    SimResult idle;
     int failures = 0;
 
-    printf("== Gravepowder headless gameplay sim ==\n");
-    printf("fixed 60 Hz steps, no rendering; bot plays ASHEN MILL start->finish\n\n");
+    printf("== Gravepowder headless gameplay sim (v0.2 valley campaign) ==\n");
+    printf("fixed 60 Hz steps, no rendering; bot plays ASHEN MILL -> BONE ORCHARD\n\n");
 
-    scenarios[0].label = "play/third-person";
-    scenarios[0].first_person = false;
-    scenarios[0].idle = false;
-    scenarios[1].label = "play/first-person";
-    scenarios[1].first_person = true;
-    scenarios[1].idle = false;
-    scenarios[2].label = "idle/passive";
-    scenarios[2].first_person = false;
-    scenarios[2].idle = true;
+    /* ---- campaign: the mill unlocks the orchard through the quest --------- */
+    grave_game_init(&g, SIM_SEED);
+    if (!grave_game_travel_to(&g, ZONE_ASHEN_MILL)) {
+        printf("FAIL: could not enter ASHEN MILL\n");
+        return 1;
+    }
+    ashen = run_zone(&g, "campaign/ashen-mill", false);
+    print_result("campaign/ashen-mill", &ashen, false);
+    print_world(&g);
+    printf("\n");
 
-    for (int i = 0; i < 3; i++) {
-        results[i] = run_scenario(scenarios[i]);
-        print_result(scenarios[i].label, &results[i], scenarios[i].idle);
+    grave_world_to_trail(&g);
+    if (!grave_game_travel_to(&g, ZONE_BONE_ORCHARD)) {
+        printf("FAIL: BONE ORCHARD was not unlocked by clearing ASHEN MILL\n");
+        failures++;
+    } else {
+        orchard = run_zone(&g, "campaign/bone-orchard", false);
+        print_result("campaign/bone-orchard", &orchard, false);
+        print_world(&g);
         printf("\n");
+        if (!orchard.quest_done)
+            failures++;
     }
 
-    /* balance sanity gates */
-    if (!results[0].quest_done) {
-        printf("FAIL: third-person bot did not complete the quest\n");
+    /* ---- idle player: balance sanity (should die) ------------------------ */
+    grave_game_init(&g, SIM_SEED);
+    if (grave_game_travel_to(&g, ZONE_ASHEN_MILL))
+        idle = run_zone(&g, "idle/ashen-mill", true);
+    else
+        memset(&idle, 0, sizeof(idle));
+    print_result("idle/ashen-mill", &idle, true);
+    printf("\n");
+
+    /* ---- gates ----------------------------------------------------------- */
+    if (!ashen.quest_done) {
+        printf("FAIL: bot did not complete ASHEN MILL\n");
         failures++;
     }
-    if (!results[1].quest_done) {
-        printf("FAIL: first-person bot did not complete the quest\n");
-        failures++;
-    }
-    if (!results[2].died) {
+    if (!idle.died)
         printf("WARN: a player who does nothing never dies - too easy\n");
-    }
-    if (results[0].quest_done && results[0].t_quest_done > 240.0f)
-        printf("WARN: clear time %.1fs is longer than the 3-5 min v0.1 target\n",
-               (double)results[0].t_quest_done);
-    if (results[0].quest_done && results[0].t_quest_done < 90.0f)
-        printf("WARN: clear time %.1fs is shorter than the 3-5 min v0.1 target\n",
-               (double)results[0].t_quest_done);
+    if (ashen.quest_done &&
+        (ashen.t_quest_done < 60.0f || ashen.t_quest_done > 300.0f))
+        printf("WARN: ASHEN MILL clear time %.1fs outside the 1-5 min range\n",
+               (double)ashen.t_quest_done);
+    if (orchard.quest_done &&
+        (orchard.t_quest_done < 90.0f || orchard.t_quest_done > 300.0f))
+        printf("WARN: BONE ORCHARD clear time %.1fs outside the 1.5-5 min range\n",
+               (double)orchard.t_quest_done);
 
     printf("== %s ==\n", failures == 0 ? "SIM OK" : "SIM FAILED");
     return failures == 0 ? 0 : 1;

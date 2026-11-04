@@ -9,6 +9,7 @@
  */
 #include <math.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -335,6 +336,7 @@ static void run_script(GraveGame *g, int steps)
         g->zombies_killed = 0;
         g->material_coins = 0;
         g->material_sinew = 0;
+        g->material_bone_charms = 0;
         g->quest.kind = QUEST_CLEAR_ZONE;
         g->quest.progress = 0;
     }
@@ -358,6 +360,11 @@ static float test_rng_unit(uint32_t *state)
 static bool finite_f32(float v)
 {
     return isfinite((double)v) != 0;
+}
+
+static bool valid_zone_id(ZoneId zone)
+{
+    return (int)zone >= 0 && (int)zone < ZONE_COUNT;
 }
 
 /* ================================================================== */
@@ -452,16 +459,34 @@ static void test_spec_tables(void)
         CHECK(zs->kill_goal > 0 && zs->kill_goal <= zs->spawn_budget);
         CHECK(zs->max_alive > 0 && zs->max_alive <= MAX_ZOMBIES);
         CHECK(zs->wave_interval > 0.0f);
-        CHECK(zs->coin_goal > 0 && zs->sinew_goal > 0);
-        CHECK(zs->kill_goal * 1 >= zs->coin_goal + zs->sinew_goal);
+        /* generic quest staging: kill -> material A -> material B */
+        CHECK((int)zs->material_a > (int)DROP_NONE && (int)zs->material_a < DROP_COUNT);
+        CHECK((int)zs->material_b > (int)DROP_NONE && (int)zs->material_b < DROP_COUNT);
+        CHECK((int)zs->material_a != (int)DROP_AMMO);
+        CHECK((int)zs->material_b != (int)DROP_AMMO);
+        CHECK((int)zs->material_a != (int)zs->material_b);
+        CHECK(zs->goal_a > 0 && zs->goal_b > 0);
+        CHECK(zs->kill_goal >= zs->goal_a + zs->goal_b);
+        CHECK(zs->brute_per_wave >= 0 && zs->brute_per_wave <= 2);
+        CHECK(zs->runner_share >= 0.0f && zs->runner_share <= 1.0f);
+        CHECK(zs->brute_chance >= 0.0f && zs->brute_chance < 0.5f);
+        CHECK(zs->layout >= ZONE_LAYOUT_ASHEN_MILL && zs->layout <= ZONE_LAYOUT_OLD_MINE);
     }
+    CHECK(grave_zone_spec(ZONE_BONE_ORCHARD)->kill_goal >= 50);
+    CHECK(grave_zone_spec(ZONE_BONE_ORCHARD)->material_b == DROP_BONE_CHARM);
+    CHECK(grave_zone_spec(ZONE_BONE_ORCHARD)->brute_per_wave >= 1);
+    CHECK(grave_zone_spec(ZONE_BONE_ORCHARD)->runner_share >
+          grave_zone_spec(ZONE_ASHEN_MILL)->runner_share);
     CHECK(strcmp(grave_zone_name(ZONE_ASHEN_MILL), "ASHEN MILL") == 0);
     CHECK(strcmp(grave_zone_name(ZONE_BONE_ORCHARD), "BONE ORCHARD") == 0);
+    CHECK(strcmp(grave_zone_name(ZONE_OLD_MINE), "OLD MINE") == 0);
     CHECK(grave_zone_name((ZoneId)99) != NULL);
     CHECK(grave_drop_name(DROP_COIN)[0] != '\0');
     CHECK(grave_drop_name(DROP_SINEW)[0] != '\0');
     CHECK(grave_drop_name(DROP_AMMO)[0] != '\0');
+    CHECK(grave_drop_name(DROP_BONE_CHARM)[0] != '\0');
     CHECK(grave_drop_name(DROP_NONE)[0] == '\0');
+    CHECK(grave_save_size() == GRAVE_SAVE_SIZE);
 }
 
 /* ================================================================== */
@@ -483,6 +508,10 @@ static void test_init_defaults(void)
     CHECK(g.zombies_alive == 0);
     CHECK(g.zombies_killed == 0);
     CHECK(g.material_coins == 0 && g.material_sinew == 0);
+    CHECK(g.material_bone_charms == 0);
+    CHECK(g.total_kills == 0);
+    CHECK(g.total_time == 0.0f);
+    CHECK(g.zone_runs == 0);
     CHECK(g.quest.kind == QUEST_NONE);
     CHECK(g.player.alive);
     CHECK_NEAR(g.player.hp, GRAVE_PLAYER_MAX_HP, 0.001f, "init hp");
@@ -497,6 +526,33 @@ static void test_init_defaults(void)
           grave_weapon_spec(WEAPON_MUSKET)->magazine);
     CHECK(!g.player.camera_first_person);
     CHECK(g.camera_fov > 0.0f);
+
+    /* world: only the mill is unlocked at boot, and we are on the trail */
+    CHECK(!g.world.in_zone);
+    CHECK(g.world.current == ZONE_ASHEN_MILL);
+    for (int i = 0; i < ZONE_COUNT; i++) {
+        CHECK(g.world.nodes[i].zone == (ZoneId)i);
+        CHECK(!g.world.nodes[i].cleared);
+        CHECK(g.world.nodes[i].clears == 0);
+        CHECK(g.world.nodes[i].best_time == 0.0f);
+    }
+    CHECK(g.world.nodes[ZONE_ASHEN_MILL].unlocked);
+    CHECK(!g.world.nodes[ZONE_BONE_ORCHARD].unlocked);
+    CHECK(!g.world.nodes[ZONE_OLD_MINE].unlocked);
+
+    /* inventory helpers on a fresh save */
+    CHECK(grave_inventory_weapon_count(&g) == WEAPON_COUNT);
+    for (int i = 0; i < WEAPON_COUNT; i++) {
+        CHECK(grave_inventory_owned(&g, (WeaponId)i));
+        CHECK(grave_inventory_ammo(&g, (WeaponId)i) ==
+              grave_weapon_spec((WeaponId)i)->magazine);
+    }
+    CHECK(grave_inventory_material(&g, DROP_COIN) == 0);
+    CHECK(grave_inventory_material(&g, DROP_BONE_CHARM) == 0);
+    CHECK(grave_inventory_material(&g, DROP_AMMO) == 0);
+    CHECK(!grave_inventory_owned(&g, (WeaponId)99));
+    CHECK(grave_inventory_ammo(&g, (WeaponId)99) == 0);
+    CHECK(grave_inventory_weapon_count(NULL) == 0);
 
     /* stepping the title does nothing */
     step_n(&g, 10);
@@ -524,6 +580,11 @@ static void test_start_zone(void)
 
     CHECK(g.phase == GAME_PHASE_PLAYING);
     CHECK(g.zone == ZONE_ASHEN_MILL);
+    CHECK(g.world.in_zone);
+    CHECK(g.world.current == ZONE_ASHEN_MILL);
+    CHECK(g.zone_runs == 1);
+    for (int i = 0; i < DROP_COUNT; i++)
+        CHECK(g.run_materials[i] == 0);
     CHECK(g.prop_count >= 60 && g.prop_count <= MAX_PROPS);
     CHECK(g.frame == 0u);
     CHECK(g.zone_time == 0.0f);
@@ -593,6 +654,8 @@ static void test_zone_restart(void)
     GraveGame g;
     uint32_t hash1;
     uint32_t hash2;
+    int coins_before;
+    int sinew_before;
 
     grave_game_init(&g, 424242u);
     grave_game_start_zone(&g, ZONE_ASHEN_MILL);
@@ -606,10 +669,14 @@ static void test_zone_restart(void)
     add_test_pickup(&g, DROP_COIN, vec3_make(1.0f, 0.3f, 1.0f), 30.0f);
     run_script(&g, 600);
     CHECK(count_zombies(&g) > 0);
+    coins_before = g.material_coins;
+    sinew_before = g.material_sinew;
 
-    /* restart from the title, exactly like the app does */
+    /* restart from the title / trail: run state is wiped, inventory persists */
     grave_game_start_zone(&g, ZONE_ASHEN_MILL);
     CHECK(g.phase == GAME_PHASE_PLAYING);
+    CHECK(g.world.in_zone);
+    CHECK(g.world.current == ZONE_ASHEN_MILL);
     CHECK(g.rng == g.seed);
     CHECK(g.frame == 0u);
     CHECK(g.zone_time == 0.0f);
@@ -618,16 +685,33 @@ static void test_zone_restart(void)
     CHECK(g.zombies_killed == 0);
     CHECK(count_zombies(&g) == 0);
     CHECK(count_pickups(&g) == 0);
-    CHECK(g.material_coins == 0 && g.material_sinew == 0);
+    CHECK(g.run_materials[DROP_COIN] == 0);
+    CHECK(g.run_materials[DROP_SINEW] == 0);
+    CHECK(g.run_materials[DROP_BONE_CHARM] == 0);
+    CHECK(g.material_coins == coins_before); /* inventory carries over */
+    CHECK(g.material_sinew == sinew_before);
     CHECK(g.quest.kind == QUEST_CLEAR_ZONE && g.quest.progress == 0);
     CHECK_NEAR(g.player.hp, g.player.max_hp, 0.001f, "restart full hp");
     CHECK(g.player.ammo[WEAPON_FLINTLOCK] ==
           grave_weapon_spec(WEAPON_FLINTLOCK)->magazine);
 
-    /* two clean restarts replay identically */
+    /* two clean restarts replay identically (inventory/lifetime stats are
+     * zeroed before each tape so the hash covers the same starting state) */
+    g.material_coins = 0;
+    g.material_sinew = 0;
+    g.material_bone_charms = 0;
+    g.total_kills = 0;
+    g.total_time = 0.0f;
+    g.zone_runs = 0;
     run_script(&g, 600);
     hash1 = hash_game(&g);
     grave_game_start_zone(&g, ZONE_ASHEN_MILL);
+    g.material_coins = 0;
+    g.material_sinew = 0;
+    g.material_bone_charms = 0;
+    g.total_kills = 0;
+    g.total_time = 0.0f;
+    g.zone_runs = 0;
     run_script(&g, 600);
     hash2 = hash_game(&g);
     CHECK(hash1 == hash2);
@@ -1207,6 +1291,7 @@ static void test_drops_pickups(void)
     step_idle(&g);
     CHECK(!g.pickups[pickup].active);
     CHECK(g.material_coins == 1);
+    CHECK(g.run_materials[DROP_COIN] == 1);
     CHECK((g.events & GRAVE_EVT_PICKUP) != 0u);
 
     /* sinew pickup */
@@ -1215,6 +1300,16 @@ static void test_drops_pickups(void)
     add_test_pickup(&g, DROP_SINEW, vec3_make(0.0f, 0.35f, 0.5f), 30.0f);
     step_idle(&g);
     CHECK(g.material_sinew == 1);
+    CHECK(g.run_materials[DROP_SINEW] == 1);
+
+    /* bone charm pickup (BONE ORCHARD material, v0.2) */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    add_test_pickup(&g, DROP_BONE_CHARM, vec3_make(0.0f, 0.35f, 0.5f), 30.0f);
+    step_idle(&g);
+    CHECK(g.material_bone_charms == 1);
+    CHECK(g.run_materials[DROP_BONE_CHARM] == 1);
+    CHECK(grave_inventory_material(&g, DROP_BONE_CHARM) == 1);
 
     /* powder tops up the current weapon by 2, clamped to the magazine */
     quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
@@ -1386,8 +1481,10 @@ static bool all_zombies_clear_of_props(const GraveGame *g)
             continue;
         if (z->state == ZOMBIE_DYING || z->state == ZOMBIE_DEAD)
             continue;
+        /* the core pushes circles out to exactly their radius, so a zombie
+         * resting against a prop is legal; only real penetration is a bug */
         if (blocked_by_props_xz(g, z->pos.x, z->pos.z,
-                                grave_zombie_spec(z->type)->radius + 0.05f))
+                                grave_zombie_spec(z->type)->radius - 0.01f))
             return false;
     }
     return true;
@@ -1472,38 +1569,49 @@ static void test_quest(void)
     CHECK(g.quest.kind == QUEST_CLEAR_ZONE);
     CHECK(g.quest.progress == g.zombies_killed);
 
+    /* kill step done -> collect material A (generic, zone-driven) */
     g.zombies_killed = zs->kill_goal;
     step_idle(&g);
     CHECK(g.quest.kind == QUEST_COLLECT);
-    CHECK(g.quest.material == DROP_COIN);
-    CHECK(g.quest.target == zs->coin_goal);
+    CHECK(g.quest.material == (int)zs->material_a);
+    CHECK(g.quest.target == zs->goal_a);
     CHECK(g.quest.progress == 0);
 
-    g.material_coins = zs->coin_goal / 3;
+    g.run_materials[zs->material_a] = zs->goal_a / 3;
     step_idle(&g);
     CHECK(g.quest.kind == QUEST_COLLECT);
-    CHECK(g.quest.progress == g.material_coins);
+    CHECK(g.quest.progress == g.run_materials[zs->material_a]);
     CHECK(g.phase == GAME_PHASE_PLAYING);
 
-    g.material_coins = zs->coin_goal;
+    /* material A done -> collect material B */
+    g.run_materials[zs->material_a] = zs->goal_a;
     step_idle(&g);
-    CHECK(g.quest.material == DROP_SINEW);
-    CHECK(g.quest.target == zs->sinew_goal);
+    CHECK(g.quest.material == (int)zs->material_b);
+    CHECK(g.quest.target == zs->goal_b);
     CHECK(g.quest.progress == 0);
     CHECK(g.phase == GAME_PHASE_PLAYING);
 
-    g.material_sinew = zs->sinew_goal / 2;
+    g.run_materials[zs->material_b] = zs->goal_b / 2;
     step_idle(&g);
-    CHECK(g.quest.progress == g.material_sinew);
+    CHECK(g.quest.progress == g.run_materials[zs->material_b]);
     CHECK(g.phase == GAME_PHASE_PLAYING);
 
     clear_events(&g);
-    g.material_sinew = zs->sinew_goal;
+    g.run_materials[zs->material_b] = zs->goal_b;
     step_idle(&g);
     CHECK(g.quest.kind == QUEST_DONE);
     CHECK(g.phase == GAME_PHASE_QUEST_COMPLETE);
     CHECK((g.events & GRAVE_EVT_QUEST_DONE) != 0u);
     CHECK((g.events & GRAVE_EVT_ZONE_DONE) != 0u);
+
+    /* v0.2 progression: zone marked cleared, best time recorded, next zone
+     * unlocked, the one after that still locked */
+    CHECK(g.world.nodes[ZONE_ASHEN_MILL].cleared);
+    CHECK(g.world.nodes[ZONE_ASHEN_MILL].clears == 1);
+    CHECK(g.world.nodes[ZONE_ASHEN_MILL].best_time > 0.0f);
+    CHECK(g.world.nodes[ZONE_BONE_ORCHARD].unlocked);
+    CHECK(!g.world.nodes[ZONE_BONE_ORCHARD].cleared);
+    CHECK(!g.world.nodes[ZONE_OLD_MINE].unlocked);
 
     /* results screen: stepping is frozen while QUEST_COMPLETE */
     {
@@ -1518,8 +1626,8 @@ static void test_quest(void)
     /* all conditions met in a single step hop through every stage */
     quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
     g.zombies_killed = zs->kill_goal;
-    g.material_coins = zs->coin_goal;
-    g.material_sinew = zs->sinew_goal;
+    g.run_materials[zs->material_a] = zs->goal_a;
+    g.run_materials[zs->material_b] = zs->goal_b;
     step_idle(&g);
     CHECK(g.quest.kind == QUEST_DONE);
     CHECK(g.phase == GAME_PHASE_QUEST_COMPLETE);
@@ -1527,11 +1635,349 @@ static void test_quest(void)
     /* not complete if the kill goal is short, even with the goods */
     quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
     g.zombies_killed = zs->kill_goal - 1;
-    g.material_coins = zs->coin_goal;
-    g.material_sinew = zs->sinew_goal;
+    g.run_materials[zs->material_a] = zs->goal_a;
+    g.run_materials[zs->material_b] = zs->goal_b;
     step_idle(&g);
     CHECK(g.phase == GAME_PHASE_PLAYING);
     CHECK(g.quest.progress == zs->kill_goal - 1);
+}
+
+/* ================================================================== */
+/* world progression (v0.2)                                            */
+/* ================================================================== */
+
+static void test_world_progression(void)
+{
+    GraveGame g;
+    const ZoneSpec *ashen = grave_zone_spec(ZONE_ASHEN_MILL);
+    const ZoneSpec *orchard = grave_zone_spec(ZONE_BONE_ORCHARD);
+
+    grave_game_init(&g, TEST_SEED);
+    CHECK(grave_world_unlocked(&g, ZONE_ASHEN_MILL));
+    CHECK(!grave_world_unlocked(&g, ZONE_BONE_ORCHARD));
+    CHECK(!grave_world_unlocked(&g, ZONE_OLD_MINE));
+    CHECK(!grave_world_cleared(&g, ZONE_ASHEN_MILL));
+    CHECK(!g.world.in_zone);
+
+    /* locked zones can't be entered and leave the game untouched */
+    grave_game_start_zone(&g, ZONE_BONE_ORCHARD);
+    CHECK(g.phase == GAME_PHASE_TITLE);
+    CHECK(!g.world.in_zone);
+    CHECK(g.prop_count == 0);
+    CHECK(g.zone == ZONE_ASHEN_MILL);
+    CHECK(!grave_game_travel_to(&g, ZONE_BONE_ORCHARD));
+    CHECK(!grave_game_travel_to(&g, (ZoneId)99));
+
+    /* the mill is the first stop and starts normally */
+    grave_game_start_zone(&g, ZONE_ASHEN_MILL);
+    CHECK(g.world.in_zone && g.world.current == ZONE_ASHEN_MILL);
+    CHECK(g.zone_runs == 1);
+    CHECK(g.quest.target == ashen->kill_goal);
+
+    /* back to the trail/world map */
+    grave_world_to_trail(&g);
+    CHECK(!g.world.in_zone);
+    CHECK(g.phase == GAME_PHASE_TITLE);
+    CHECK(g.world.current == ZONE_ASHEN_MILL);
+
+    /* finish the mill quest: it clears the node and unlocks the orchard */
+    grave_game_start_zone(&g, ZONE_ASHEN_MILL);
+    g.zombies_killed = ashen->kill_goal;
+    g.run_materials[ashen->material_a] = ashen->goal_a;
+    g.run_materials[ashen->material_b] = ashen->goal_b;
+    step_idle(&g);
+    CHECK(g.phase == GAME_PHASE_QUEST_COMPLETE);
+    CHECK(grave_world_cleared(&g, ZONE_ASHEN_MILL));
+    CHECK(grave_world_unlocked(&g, ZONE_BONE_ORCHARD));
+    CHECK(!grave_world_unlocked(&g, ZONE_OLD_MINE));
+    CHECK(g.world.nodes[ZONE_ASHEN_MILL].best_time > 0.0f);
+
+    /* travel to the newly unlocked zone */
+    grave_world_to_trail(&g);
+    CHECK(grave_game_travel_to(&g, ZONE_BONE_ORCHARD));
+    CHECK(g.zone == ZONE_BONE_ORCHARD);
+    CHECK(g.world.in_zone && g.world.current == ZONE_BONE_ORCHARD);
+    CHECK(g.zone_runs == 3);
+    CHECK(g.quest.kind == QUEST_CLEAR_ZONE);
+    CHECK(g.quest.target == orchard->kill_goal);
+    CHECK(g.prop_count > 100);
+    CHECK(g.world.nodes[ZONE_ASHEN_MILL].cleared); /* still remembered */
+
+    /* the old mine is still locked; the unlock helper opens it */
+    CHECK(!grave_game_travel_to(&g, ZONE_OLD_MINE));
+    CHECK(grave_world_unlock(&g, ZONE_OLD_MINE));
+    CHECK(grave_world_unlocked(&g, ZONE_OLD_MINE));
+    CHECK(grave_game_travel_to(&g, ZONE_OLD_MINE));
+    CHECK(g.zone == ZONE_OLD_MINE);
+    CHECK(g.world.current == ZONE_OLD_MINE);
+
+    CHECK(!grave_world_unlock(&g, (ZoneId)99));
+    CHECK(!grave_world_unlocked(NULL, ZONE_ASHEN_MILL));
+    CHECK(!grave_world_cleared(NULL, ZONE_ASHEN_MILL));
+    CHECK(!grave_game_travel_to(NULL, ZONE_ASHEN_MILL));
+    grave_world_to_trail(NULL);
+}
+
+/* ================================================================== */
+/* BONE ORCHARD (v0.2 zone)                                            */
+/* ================================================================== */
+
+static void test_bone_orchard(void)
+{
+    GraveGame g;
+    const ZoneSpec *zs = grave_zone_spec(ZONE_BONE_ORCHARD);
+    int tombstones = 0;
+    int trees = 0;
+    int gate_fence = 0;
+
+    grave_game_init(&g, TEST_SEED);
+    CHECK(grave_world_unlock(&g, ZONE_BONE_ORCHARD));
+    CHECK(grave_game_travel_to(&g, ZONE_BONE_ORCHARD));
+    CHECK(g.zone == ZONE_BONE_ORCHARD);
+    CHECK(g.phase == GAME_PHASE_PLAYING);
+    CHECK(g.quest.kind == QUEST_CLEAR_ZONE);
+    CHECK(g.quest.target == zs->kill_goal);
+    CHECK(g.quest.target >= 50);
+    CHECK(g.zone_runs == 1);
+    CHECK(g.prop_count >= 100 && g.prop_count <= MAX_PROPS);
+    CHECK(!blocked_by_props_xz(&g, g.player.transform.pos.x,
+                               g.player.transform.pos.z, GRAVE_PLAYER_RADIUS));
+
+    for (int i = 0; i < g.prop_count; i++) {
+        const Prop *p = &g.props[i];
+        CHECK(p->half.x > 0.0f && p->half.y > 0.0f && p->half.z > 0.0f);
+        CHECK((int)p->kind >= 0 && (int)p->kind < PROP_KIND_COUNT);
+        CHECK(fabsf(p->pos.x) <= 20.5f && fabsf(p->pos.z) <= 20.5f);
+        if (p->kind == PROP_TOMBSTONE)
+            tombstones++;
+        if (p->kind == PROP_DEADTREE)
+            trees++;
+        if (p->kind == PROP_FENCE && p->pos.z > 19.0f && fabsf(p->pos.x) < 2.0f)
+            gate_fence++;
+    }
+    CHECK(tombstones >= 40); /* much denser than the mill */
+    CHECK(trees >= 8);
+    CHECK(gate_fence == 0);
+    CHECK(tombstones > 5);
+
+    /* BONE ORCHARD is the runner-heavy, brute-per-wave zone */
+    CHECK(zs->brute_per_wave == 1);
+    CHECK(zs->runner_share > grave_zone_spec(ZONE_ASHEN_MILL)->runner_share);
+    CHECK(zs->kill_goal != grave_zone_spec(ZONE_ASHEN_MILL)->kill_goal);
+
+    /* first wave contains exactly one brute (the rest roll normally) */
+    memset(g.zombies, 0, sizeof(g.zombies));
+    memset(g.pickups, 0, sizeof(g.pickups));
+    g.zombies_alive = 0;
+    g.spawn_budget = zs->spawn_budget;
+    g.spawn_timer = 0.0f;
+    step_idle(&g);
+    CHECK(count_zombies(&g) == 3);
+    {
+        int brutes = 0;
+        for (int i = 0; i < MAX_ZOMBIES; i++) {
+            if (g.zombies[i].active && g.zombies[i].type == ZOMBIE_BRUTE)
+                brutes++;
+        }
+        CHECK(brutes == 1);
+    }
+
+    /* drops: kill 1 -> material A (coin), kill 2 -> material B (bone charm).
+     * Player fires down the clear entrance lane between the gravestone rows. */
+    memset(g.zombies, 0, sizeof(g.zombies));
+    memset(g.pickups, 0, sizeof(g.pickups));
+    g.zombies_alive = 0;
+    g.zombies_killed = 0;
+    g.spawn_budget = 0;
+    g.spawn_timer = 1.0e9f;
+    g.player.transform.pos = vec3_make(0.0f, 0.0f, 14.5f);
+    g.player.transform.yaw = GRAVE_PI;
+    g.player.transform.pitch = aim_pitch_at(0.8f, 4.0f);
+    place_zombie(&g, 0, ZOMBIE_RUNNER, vec3_make(0.0f, 0.0f, 10.5f), ZOMBIE_CHASE);
+    g.zombies[0].hp = 1.0f;
+    set_weapon(&g, WEAPON_FLINTLOCK);
+    g.player.ammo[WEAPON_FLINTLOCK] = 1;
+    fire_once(&g);
+    CHECK(g.zombies_killed == 1);
+    CHECK(first_active_pickup(&g) >= 0);
+    CHECK(g.pickups[first_active_pickup(&g)].kind == zs->material_a);
+
+    memset(g.zombies, 0, sizeof(g.zombies));
+    memset(g.pickups, 0, sizeof(g.pickups));
+    g.zombies_alive = 0;
+    g.zombies_killed = 1;
+    g.player.transform.pitch = aim_pitch_at(0.8f, 4.0f);
+    place_zombie(&g, 0, ZOMBIE_RUNNER, vec3_make(0.0f, 0.0f, 10.5f), ZOMBIE_CHASE);
+    g.zombies[0].hp = 1.0f;
+    set_weapon(&g, WEAPON_FLINTLOCK);
+    g.player.ammo[WEAPON_FLINTLOCK] = 1;
+    fire_once(&g);
+    CHECK(first_active_pickup(&g) >= 0);
+    CHECK(g.pickups[first_active_pickup(&g)].kind == DROP_BONE_CHARM);
+
+    /* staged quest: kills -> coins -> bone charms -> cleared + old mine */
+    g.zombies_killed = zs->kill_goal;
+    step_idle(&g);
+    CHECK(g.quest.kind == QUEST_COLLECT);
+    CHECK(g.quest.material == (int)zs->material_a);
+    CHECK(g.quest.target == zs->goal_a);
+    g.run_materials[zs->material_a] = zs->goal_a;
+    step_idle(&g);
+    CHECK(g.quest.material == (int)zs->material_b);
+    CHECK(g.quest.target == zs->goal_b);
+    g.run_materials[zs->material_b] = zs->goal_b;
+    g.zone_time = 42.0f;
+    clear_events(&g);
+    step_idle(&g);
+    CHECK(g.quest.kind == QUEST_DONE);
+    CHECK(g.phase == GAME_PHASE_QUEST_COMPLETE);
+    CHECK((g.events & GRAVE_EVT_ZONE_DONE) != 0u);
+    CHECK(grave_world_cleared(&g, ZONE_BONE_ORCHARD));
+    CHECK(grave_world_unlocked(&g, ZONE_OLD_MINE));
+    CHECK_NEAR(g.world.nodes[ZONE_BONE_ORCHARD].best_time, 42.0f + TEST_DT, 0.01f,
+               "orchard best time");
+}
+
+/* ================================================================== */
+/* save data (v0.2)                                                    */
+/* ================================================================== */
+
+static void test_save(void)
+{
+    GraveGame a;
+    GraveGame b;
+    uint8_t buf[GRAVE_SAVE_SIZE];
+    uint8_t buf2[GRAVE_SAVE_SIZE];
+    uint8_t bad[GRAVE_SAVE_SIZE];
+    GraveSettings settings;
+    GraveSettings loaded;
+    SaveData sd;
+    int written;
+
+    memset(&settings, 0, sizeof(settings));
+    settings.invert_y = 1;
+    settings.touch_sens = 3;
+    settings.muted = 1;
+
+    grave_game_init(&a, 777u);
+    CHECK(grave_world_unlock(&a, ZONE_BONE_ORCHARD));
+    a.world.nodes[ZONE_ASHEN_MILL].cleared = true;
+    a.world.nodes[ZONE_ASHEN_MILL].clears = 2;
+    a.world.nodes[ZONE_ASHEN_MILL].best_time = 95.5f;
+    a.world.current = ZONE_BONE_ORCHARD;
+    a.material_coins = 17;
+    a.material_sinew = 9;
+    a.material_bone_charms = 4;
+    a.player.weapon_owned[WEAPON_MUSKET] = false;
+    a.player.ammo[WEAPON_REVOLVER] = 3;
+    a.player.camera_first_person = true;
+    a.total_kills = 123;
+    a.total_time = 456.5f;
+    a.zone_runs = 7;
+
+    written = grave_save_to_buffer(&a, &settings, buf, sizeof(buf));
+    CHECK(written == GRAVE_SAVE_SIZE);
+    CHECK(written == grave_save_size());
+    memcpy(&sd, buf, sizeof(sd));
+    CHECK(sd.magic == GRAVE_SAVE_MAGIC);
+    CHECK(sd.version == GRAVE_SAVE_VERSION);
+    CHECK(sd.bytes == (uint16_t)GRAVE_SAVE_SIZE);
+    CHECK(sd.checksum != 0u);
+
+    /* byte-identical images for the same state */
+    CHECK(grave_save_to_buffer(&a, &settings, buf2, sizeof(buf2)) == written);
+    CHECK(memcmp(buf, buf2, sizeof(buf)) == 0);
+
+    /* a state change changes the bytes */
+    a.material_coins++;
+    CHECK(grave_save_to_buffer(&a, &settings, buf2, sizeof(buf2)) == written);
+    CHECK(memcmp(buf, buf2, sizeof(buf)) != 0);
+    a.material_coins--;
+
+    /* bad save arguments */
+    CHECK(grave_save_to_buffer(&a, NULL, buf2, 8) == 0);
+    CHECK(grave_save_to_buffer(NULL, NULL, buf2, sizeof(buf2)) == 0);
+
+    /* round-trip into a fresh game */
+    grave_game_init(&b, 999u);
+    memset(&loaded, 0xFF, sizeof(loaded));
+    CHECK(grave_load_from_buffer(&b, &loaded, buf, sizeof(buf)));
+    CHECK(b.world.current == ZONE_BONE_ORCHARD);
+    CHECK(grave_world_unlocked(&b, ZONE_BONE_ORCHARD));
+    CHECK(grave_world_cleared(&b, ZONE_ASHEN_MILL));
+    CHECK(b.world.nodes[ZONE_ASHEN_MILL].clears == 2);
+    CHECK_NEAR(b.world.nodes[ZONE_ASHEN_MILL].best_time, 95.5f, 0.01f,
+               "save best time");
+    CHECK(b.phase == GAME_PHASE_TITLE);
+    CHECK(!b.world.in_zone);
+    CHECK(b.material_coins == 17);
+    CHECK(b.material_sinew == 9);
+    CHECK(b.material_bone_charms == 4);
+    CHECK(!b.player.weapon_owned[WEAPON_MUSKET]);
+    CHECK(b.player.weapon_owned[WEAPON_FLINTLOCK]);
+    CHECK(b.player.weapon_owned[WEAPON_REVOLVER]);
+    CHECK(b.player.ammo[WEAPON_REVOLVER] == 3);
+    CHECK(b.player.camera_first_person);
+    CHECK(b.total_kills == 123);
+    CHECK_NEAR(b.total_time, 456.5f, 0.01f, "save play time");
+    CHECK(b.zone_runs == 7);
+    CHECK(loaded.invert_y == 1);
+    CHECK(loaded.touch_sens == 3);
+    CHECK(loaded.muted == 1);
+
+    /* a loaded save can be travelled from immediately */
+    CHECK(grave_game_travel_to(&b, ZONE_BONE_ORCHARD));
+    CHECK(b.zone == ZONE_BONE_ORCHARD);
+    CHECK(b.phase == GAME_PHASE_PLAYING);
+    CHECK(b.material_coins == 17); /* inventory persists across start_zone */
+
+    /* bad images are rejected and leave the game untouched */
+    grave_game_init(&b, 999u);
+    {
+        uint32_t before = hash_game(&b);
+
+        memcpy(bad, buf, sizeof(bad));
+        bad[0] ^= 0xFFu; /* magic */
+        CHECK(!grave_load_from_buffer(&b, NULL, bad, sizeof(bad)));
+        CHECK(hash_game(&b) == before);
+
+        memcpy(bad, buf, sizeof(bad));
+        bad[4] = (uint8_t)(GRAVE_SAVE_VERSION + 1u); /* version */
+        CHECK(!grave_load_from_buffer(&b, NULL, bad, sizeof(bad)));
+        CHECK(hash_game(&b) == before);
+
+        memcpy(bad, buf, sizeof(bad));
+        bad[6] = (uint8_t)(GRAVE_SAVE_SIZE - 1); /* size field */
+        CHECK(!grave_load_from_buffer(&b, NULL, bad, sizeof(bad)));
+        CHECK(hash_game(&b) == before);
+
+        memcpy(bad, buf, sizeof(bad));
+        bad[offsetof(SaveData, material_coins)] ^= 0x01u; /* corrupt payload */
+        CHECK(!grave_load_from_buffer(&b, NULL, bad, sizeof(bad)));
+        CHECK(hash_game(&b) == before);
+
+        memcpy(bad, buf, sizeof(bad));
+        bad[offsetof(SaveData, unlocked_mask)] |= 0x80u; /* unknown zone bit */
+        CHECK(!grave_load_from_buffer(&b, NULL, bad, sizeof(bad)));
+        CHECK(hash_game(&b) == before);
+
+        CHECK(!grave_load_from_buffer(&b, NULL, buf, 16)); /* truncated */
+        CHECK(!grave_load_from_buffer(NULL, NULL, buf, sizeof(buf)));
+        CHECK(!grave_load_from_buffer(&b, NULL, NULL, sizeof(buf)));
+        CHECK(hash_game(&b) == before);
+    }
+
+    /* a save written at zone start replays the run deterministically */
+    grave_game_init(&a, 2024u);
+    grave_game_start_zone(&a, ZONE_ASHEN_MILL);
+    CHECK(grave_save_to_buffer(&a, NULL, buf, sizeof(buf)) == written);
+    grave_game_init(&b, 2024u);
+    grave_game_start_zone(&b, ZONE_ASHEN_MILL);
+    run_script(&a, 240);
+    run_script(&b, 240);
+    CHECK(a.rng == b.rng);
+    CHECK(a.zombies_killed == b.zombies_killed);
+    CHECK(a.prop_count == b.prop_count);
 }
 
 /* ================================================================== */
@@ -1869,9 +2315,33 @@ static int stress_invariant_violations(const GraveGame *g)
             bad++;
         if (g->quest.progress < 0)
             bad++;
-        if (g->material_coins < 0 || g->material_sinew < 0)
+        if (g->material_coins < 0 || g->material_sinew < 0 ||
+            g->material_bone_charms < 0)
             bad++;
         if (g->spawn_budget < 0)
+            bad++;
+        for (int i = 0; i < DROP_COUNT; i++) {
+            if (g->run_materials[i] < 0)
+                bad++;
+        }
+        if (!finite_f32(g->total_time) || g->total_time < 0.0f)
+            bad++;
+        if (g->total_kills < 0 || g->zone_runs < 0)
+            bad++;
+        if (!valid_zone_id(g->world.current))
+            bad++;
+        for (int i = 0; i < ZONE_COUNT; i++) {
+            const ZoneNode *node = &g->world.nodes[i];
+            if (!valid_zone_id(node->zone) || node->zone != (ZoneId)i)
+                bad++;
+            if (node->clears < 0)
+                bad++;
+            if (!finite_f32(node->best_time) || node->best_time < 0.0f)
+                bad++;
+        }
+        if (!g->world.nodes[ZONE_ASHEN_MILL].unlocked)
+            bad++;
+        if ((int)g->player.weapon < 0 || (int)g->player.weapon >= WEAPON_COUNT)
             bad++;
     }
     return bad;
@@ -1905,6 +2375,8 @@ static void test_stress(void)
         g.zombies_killed = 0;
         g.material_coins = 0;
         g.material_sinew = 0;
+        g.material_bone_charms = 0;
+        memset(g.run_materials, 0, sizeof(g.run_materials));
         g.quest.kind = QUEST_CLEAR_ZONE;
         g.quest.progress = 0;
 
@@ -1964,6 +2436,9 @@ int main(void)
     printf("  zombie AI ... ");       test_zombie_ai();       printf("done\n");
     printf("  spawner ... ");         test_spawner();         printf("done\n");
     printf("  quest ... ");           test_quest();           printf("done\n");
+    printf("  world progression ... "); test_world_progression(); printf("done\n");
+    printf("  bone orchard ... ");    test_bone_orchard();    printf("done\n");
+    printf("  save data ... ");       test_save();            printf("done\n");
     printf("  camera ... ");          test_camera();          printf("done\n");
     printf("  phases ... ");          test_phases();          printf("done\n");
     printf("  capacity ... ");        test_capacity();        printf("done\n");

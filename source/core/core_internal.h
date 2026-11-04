@@ -108,9 +108,31 @@ typedef struct {
     int   kill_goal;       /* quest kill step target                        */
     int   max_alive;       /* concurrent zombie cap (sim-side, < MAX_ZOMBIES) */
     float wave_interval;   /* seconds between spawn waves                   */
-    int   coin_goal;       /* quest collect step: old coins                 */
-    int   sinew_goal;      /* quest collect step: rot sinew                 */
+
+    /* Generic quest staging (v0.2): kill goal -> collect material A ->
+     * collect material B -> done.  Ashen Mill = coins + sinew, Bone Orchard =
+     * coins + bone charms. */
+    GraveDrop material_a;
+    int       goal_a;
+    GraveDrop material_b;
+    int       goal_b;
+
+    /* Spawner flavour: brutes forced at the head of each wave and how the
+     * rest of the wave rolls. */
+    int   brute_per_wave;  /* guaranteed brutes per wave (0 = random only)  */
+    float runner_share;    /* mid/late-wave runner ratio, 0..1              */
+    float brute_chance;    /* random extra brute chance, 0..1               */
+
+    /* Which hand-authored prop layout to build (ZONE_LAYOUT_*). */
+    int   layout;
 } ZoneSpec;
+
+/* zone layout ids, internal (the renderer just draws props) */
+enum {
+    ZONE_LAYOUT_ASHEN_MILL = 0,
+    ZONE_LAYOUT_BONE_ORCHARD,
+    ZONE_LAYOUT_OLD_MINE
+};
 
 const ZoneSpec *grave_zone_spec(ZoneId zone);
 

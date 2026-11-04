@@ -16,6 +16,7 @@
  * Numbers (damage, drop rates, zombie stats, zone tuning) live in data.c.
  */
 #include <math.h>
+#include <stddef.h>
 #include <string.h>
 
 #include "grave.h"
@@ -326,7 +327,9 @@ static void add_prop(GraveGame *game, Vec3 pos, Vec3 half, float yaw, PropKind k
     game->prop_count++;
 }
 
-static void build_ashen_mill(GraveGame *game)
+/* Shared 40x40 perimeter wall with the south gate opening; every zone reuses
+ * it so the arena bounds stay identical. */
+static void build_perimeter(GraveGame *game)
 {
     const float half = 20.0f;
     const float fence_half_len = 1.25f;
@@ -355,11 +358,16 @@ static void build_ashen_mill(GraveGame *game)
     }
 
     /* gate: two heavy posts framing the opening (decorative; the arena bounds
-     * keep the player in the yard in v0.1) */
+     * keep the player in the zone in v0.1/v0.2) */
     add_prop(game, vec3_make(-3.0f, 0.0f, half),
              vec3_make(0.22f, 1.70f, 0.22f), 0.0f, PROP_GATE);
     add_prop(game, vec3_make(3.0f, 0.0f, half),
              vec3_make(0.22f, 1.70f, 0.22f), 0.0f, PROP_GATE);
+}
+
+static void build_ashen_mill(GraveGame *game)
+{
+    build_perimeter(game);
 
     /* the old well, west-ish of centre */
     add_prop(game, vec3_make(-6.5f, 0.0f, 1.5f),
@@ -424,11 +432,81 @@ static void build_ashen_mill(GraveGame *game)
              vec3_make(0.30f, 1.90f, 0.30f), 0.0f, PROP_DEADTREE);
 }
 
+/* BONE ORCHARD: the same 40x40 walled yard, but given over to the dead.  Dense
+ * rows of leaning gravestones with clear lanes between them, a ring of dead
+ * orchard trees and only a little cover near the gate.  Same PropKinds as the
+ * mill, so the renderer needs no new prop art. */
+static void build_bone_orchard(GraveGame *game)
+{
+    build_perimeter(game);
+
+    /* gravestone rows: 5 m apart in z, 3 m in x, centre/entrance kept clear */
+    for (int row = 0; row < 6; row++) {
+        float z = -15.0f + 5.0f * (float)row;
+        for (int col = 0; col < 11; col++) {
+            float x = -15.0f + 3.0f * (float)col;
+            float tilt;
+            if (z > 7.0f && fabsf(x) < 4.5f)
+                continue; /* apron in front of the gate */
+            /* deterministic scatter of leaning stones */
+            tilt = (float)(((row * 7 + col * 5) % 9) - 4) * 0.06f;
+            add_prop(game, vec3_make(x, 0.0f, z),
+                     vec3_make(0.40f, 0.62f, 0.16f), tilt, PROP_TOMBSTONE);
+        }
+    }
+
+    /* dead orchard trees, thickest around the walls; kept between the rows */
+    add_prop(game, vec3_make(-13.4f, 0.0f, -12.5f),
+             vec3_make(0.36f, 2.40f, 0.36f), 0.0f, PROP_DEADTREE);
+    add_prop(game, vec3_make(13.4f, 0.0f, -7.5f),
+             vec3_make(0.34f, 2.30f, 0.34f), 0.0f, PROP_DEADTREE);
+    add_prop(game, vec3_make(-13.4f, 0.0f, 2.5f),
+             vec3_make(0.35f, 2.20f, 0.35f), 0.0f, PROP_DEADTREE);
+    add_prop(game, vec3_make(13.4f, 0.0f, 7.5f),
+             vec3_make(0.33f, 2.25f, 0.33f), 0.0f, PROP_DEADTREE);
+    add_prop(game, vec3_make(-4.5f, 0.0f, -12.5f),
+             vec3_make(0.32f, 2.10f, 0.32f), 0.0f, PROP_DEADTREE);
+    add_prop(game, vec3_make(8.0f, 0.0f, -2.5f),
+             vec3_make(0.32f, 2.00f, 0.32f), 0.0f, PROP_DEADTREE);
+    add_prop(game, vec3_make(-8.0f, 0.0f, 12.5f),
+             vec3_make(0.31f, 2.05f, 0.31f), 0.0f, PROP_DEADTREE);
+    add_prop(game, vec3_make(4.5f, 0.0f, 12.5f),
+             vec3_make(0.30f, 1.95f, 0.30f), 0.0f, PROP_DEADTREE);
+    add_prop(game, vec3_make(-17.0f, 0.0f, 5.0f),
+             vec3_make(0.38f, 2.50f, 0.38f), 0.0f, PROP_DEADTREE);
+    add_prop(game, vec3_make(17.0f, 0.0f, -12.0f),
+             vec3_make(0.36f, 2.35f, 0.36f), 0.0f, PROP_DEADTREE);
+
+    /* a little cover near the entrance, like the gate warden's post */
+    add_prop(game, vec3_make(5.0f, 0.0f, 12.8f),
+             vec3_make(0.50f, 0.50f, 0.50f), 0.25f, PROP_CRATE);
+    add_prop(game, vec3_make(-5.0f, 0.0f, 12.2f),
+             vec3_make(0.45f, 0.45f, 0.45f), -0.30f, PROP_CRATE);
+    add_prop(game, vec3_make(7.0f, 0.0f, -13.5f),
+             vec3_make(0.48f, 0.48f, 0.48f), 0.50f, PROP_CRATE);
+    add_prop(game, vec3_make(-12.0f, 0.0f, 7.0f),
+             vec3_make(0.42f, 0.60f, 0.42f), 0.0f, PROP_BARREL);
+    add_prop(game, vec3_make(12.0f, 0.0f, -7.0f),
+             vec3_make(0.40f, 0.58f, 0.40f), 0.0f, PROP_BARREL);
+    add_prop(game, vec3_make(0.0f, 0.0f, -17.0f),
+             vec3_make(0.38f, 0.56f, 0.38f), 0.0f, PROP_BARREL);
+}
+
 static void build_zone_layout(GraveGame *game)
 {
-    /* v0.1 only ships ASHEN MILL; the other zones reuse the yard as a
-     * placeholder until their props get authored. */
-    build_ashen_mill(game);
+    /* OLD MINE is a v0.2 stub: its spec exists but it still reuses the mill
+     * layout until the mine props are authored. */
+    const ZoneSpec *zs = grave_zone_spec(game->zone);
+    switch (zs->layout) {
+    case ZONE_LAYOUT_BONE_ORCHARD:
+        build_bone_orchard(game);
+        break;
+    case ZONE_LAYOUT_OLD_MINE:
+    case ZONE_LAYOUT_ASHEN_MILL:
+    default:
+        build_ashen_mill(game);
+        break;
+    }
 }
 
 /* ================================================================== */
@@ -468,18 +546,19 @@ static void drop_pickup(GraveGame *game, GraveDrop kind, Vec3 pos)
     }
 }
 
-/* v0.1 drop table: a rotating coin / sinew / coin / (powder or coin) cycle.
- * It is deliberately not a pure random roll: the quest needs 8 coins + 4
- * sinew, and 22 kills on this cycle always *drop* at least 12 coins and 5
- * sinew, so the collect step can never be soft-locked by bad luck. */
+/* Zone-generic drop table: [material A, material B, material A, (powder|A)].
+ * Deliberately not a pure random roll: the zone quest needs goal_a of A and
+ * goal_b of B, and `kill_goal` kills always drop far more than that on this
+ * cycle, so a collect step can never soft-lock on bad luck. */
 static GraveDrop choose_drop(GraveGame *game)
 {
+    const ZoneSpec *zs = grave_zone_spec(game->zone);
     int slot = (game->zombies_killed - 1) & 3;
     switch (slot) {
-    case 0:  return DROP_COIN;
-    case 1:  return DROP_SINEW;
-    case 2:  return DROP_COIN;
-    default: return (rng_unit(game) < 0.60f) ? DROP_AMMO : DROP_COIN;
+    case 0:  return zs->material_a;
+    case 1:  return zs->material_b;
+    case 2:  return zs->material_a;
+    default: return (rng_unit(game) < 0.60f) ? DROP_AMMO : zs->material_a;
     }
 }
 
@@ -504,9 +583,15 @@ static void update_pickups(GraveGame *game, float dt)
         switch (q->kind) {
         case DROP_COIN:
             game->material_coins++;
+            game->run_materials[DROP_COIN]++;
             break;
         case DROP_SINEW:
             game->material_sinew++;
+            game->run_materials[DROP_SINEW]++;
+            break;
+        case DROP_BONE_CHARM:
+            game->material_bone_charms++;
+            game->run_materials[DROP_BONE_CHARM]++;
             break;
         case DROP_AMMO: {
             const WeaponSpec *spec = grave_weapon_spec(p->weapon);
@@ -620,6 +705,7 @@ static void damage_zombie(GraveGame *game, int index, float damage)
         z->attack_timer = 0.0f;
         z->speed = 0.0f;
         game->zombies_killed++;
+        game->total_kills++;
         game->events |= GRAVE_EVT_ZOMBIE_DIE;
         drop_pickup(game, choose_drop(game), z->pos);
         return;
@@ -1094,26 +1180,24 @@ static bool find_spawn_point(GraveGame *game, float radius, Vec3 *out)
 
 static ZombieType choose_zombie_type(GraveGame *game, int spawn_index)
 {
-    float roll;
-    /* guaranteed flavour beats: an early runner and two brutes per zone */
+    const ZoneSpec *zs = grave_zone_spec(game->zone);
+    float roll = rng_unit(game);
+    float runner = clampf(zs->runner_share, 0.0f, 0.9f);
+    float brute_late = clampf(zs->brute_chance, 0.0f, 0.9f);
+    float brute_mid = brute_late * 0.55f;
+
+    /* one early runner guarantees the fast threat shows up in wave one */
     if (spawn_index == 3)
         return ZOMBIE_RUNNER;
-    if (spawn_index == 12 || spawn_index == 25)
-        return ZOMBIE_BRUTE;
-
-    roll = rng_unit(game);
+    if (spawn_index < 8)
+        return (roll < 0.25f) ? ZOMBIE_RUNNER : ZOMBIE_SHAMBLER;
     if (spawn_index >= 18) {
-        if (roll < 0.18f) return ZOMBIE_BRUTE;
-        if (roll < 0.55f) return ZOMBIE_RUNNER;
+        if (roll < brute_late) return ZOMBIE_BRUTE;
+        if (roll < brute_late + runner) return ZOMBIE_RUNNER;
         return ZOMBIE_SHAMBLER;
     }
-    if (spawn_index >= 8) {
-        if (roll < 0.36f) return ZOMBIE_RUNNER;
-        if (roll < 0.46f) return ZOMBIE_BRUTE;
-        return ZOMBIE_SHAMBLER;
-    }
-    if (roll < 0.25f)
-        return ZOMBIE_RUNNER;
+    if (roll < brute_mid) return ZOMBIE_BRUTE;
+    if (roll < brute_mid + runner) return ZOMBIE_RUNNER;
     return ZOMBIE_SHAMBLER;
 }
 
@@ -1147,57 +1231,99 @@ static void update_spawner(GraveGame *game, float dt)
 {
     const ZoneSpec *zs = grave_zone_spec(game->zone);
     int spawned;
-    int wave_size;
     int room_alive;
     int room_pool;
     int count;
 
-    if (game->spawn_budget <= 0)
+    if (game->spawn_budget <= 0 && game->spawn_wave_left <= 0)
         return;
 
-    game->spawn_timer -= dt;
-    if (game->spawn_timer > 0.0f)
-        return;
+    /* A wave is queued as a whole (with its guaranteed brutes), then the
+     * members are released as the alive cap frees slots.  That keeps
+     * "one brute per wave" honest even when only one slot opens at a time. */
+    if (game->spawn_wave_left <= 0) {
+        game->spawn_timer -= dt;
+        if (game->spawn_timer > 0.0f)
+            return;
+        if (game->spawn_budget <= 0)
+            return;
+        spawned = zs->spawn_budget - game->spawn_budget;
+        count = 3;
+        if (spawned >= 10)
+            count = 4;
+        if (spawned >= 20)
+            count = 5;
+        if (count > game->spawn_budget)
+            count = game->spawn_budget;
+        game->spawn_wave_left = count;
+        game->spawn_wave_brutes = zs->brute_per_wave;
+        if (game->spawn_wave_brutes > count)
+            game->spawn_wave_brutes = count;
+    }
 
-    spawned = zs->spawn_budget - game->spawn_budget;
     room_alive = zs->max_alive - game->zombies_alive;
-    if (room_alive <= 0) {
-        game->spawn_timer = GRAVE_WAVE_RETRY;
-        return;
-    }
     room_pool = MAX_ZOMBIES - count_active_zombies(game);
-    if (room_pool <= 0) {
+    if (room_alive <= 0 || room_pool <= 0) {
         game->spawn_timer = GRAVE_WAVE_RETRY;
         return;
     }
 
-    wave_size = 3;
-    if (spawned >= 10)
-        wave_size = 4;
-    if (spawned >= 20)
-        wave_size = 5;
-
-    count = wave_size;
-    if (count > game->spawn_budget)
-        count = game->spawn_budget;
+    count = game->spawn_wave_left;
     if (count > room_alive)
         count = room_alive;
     if (count > room_pool)
         count = room_pool;
 
     for (int i = 0; i < count; i++) {
-        ZombieType type = choose_zombie_type(game, spawned + i);
+        ZombieType type;
         Vec3 pos;
+        if (game->spawn_wave_brutes > 0) {
+            type = ZOMBIE_BRUTE;
+            game->spawn_wave_brutes--;
+        } else {
+            type = choose_zombie_type(game, zs->spawn_budget - game->spawn_budget);
+        }
         if (!find_spawn_point(game, grave_zombie_spec(type)->radius, &pos)) {
-            /* no clean spot this wave; retry shortly without spending budget */
+            /* no clean spot right now; keep the wave queued and retry shortly */
             game->spawn_timer = GRAVE_WAVE_RETRY;
             break;
         }
         spawn_zombie(game, type, pos);
         game->spawn_budget--;
+        game->spawn_wave_left--;
     }
     game->zombies_alive = count_active_zombies(game);
-    game->spawn_timer = zs->wave_interval;
+    if (game->spawn_wave_left <= 0)
+        game->spawn_timer = zs->wave_interval;
+}
+
+/* ================================================================== */
+/* world progression                                                   */
+/* ================================================================== */
+
+static bool valid_zone(ZoneId zone)
+{
+    return (int)zone >= 0 && (int)zone < ZONE_COUNT;
+}
+
+static void world_mark_complete(GraveGame *game)
+{
+    World *w = &game->world;
+    int zi = (int)game->zone;
+    ZoneNode *node;
+
+    if (!valid_zone(game->zone))
+        return;
+    node = &w->nodes[zi];
+    node->unlocked = true;
+    node->cleared = true;
+    node->clears++;
+    if (node->best_time <= 0.0f || game->zone_time < node->best_time)
+        node->best_time = game->zone_time;
+
+    /* the valley is a chain: finishing a zone opens the next one */
+    if (zi + 1 < ZONE_COUNT)
+        w->nodes[zi + 1].unlocked = true;
 }
 
 /* ================================================================== */
@@ -1211,7 +1337,7 @@ static void update_quest(GraveGame *game)
     if (game->quest.kind == QUEST_NONE || game->quest.kind == QUEST_DONE)
         return;
 
-    for (int guard = 0; guard < 4; guard++) {
+    for (int guard = 0; guard < 6; guard++) {
         Quest *q = &game->quest;
 
         if (q->kind == QUEST_CLEAR_ZONE) {
@@ -1220,30 +1346,31 @@ static void update_quest(GraveGame *game)
             q->progress = game->zombies_killed < target ? game->zombies_killed : target;
             if (q->progress < target)
                 return;
-            /* kill step done: now bring back the goods */
+            /* kill step done: now bring back the zone's first material */
             q->kind = QUEST_COLLECT;
-            q->material = DROP_COIN;
-            q->target = zs->coin_goal;
-            q->progress = game->material_coins < q->target ? game->material_coins : q->target;
+            q->material = (int)zs->material_a;
+            q->target = zs->goal_a;
+            q->progress = game->run_materials[q->material] < q->target
+                              ? game->run_materials[q->material] : q->target;
             continue;
         }
 
         if (q->kind == QUEST_COLLECT) {
             int have = 0;
-            if (q->material == DROP_COIN)
-                have = game->material_coins;
-            else if (q->material == DROP_SINEW)
-                have = game->material_sinew;
+            if ((int)q->material >= 0 && (int)q->material < DROP_COUNT)
+                have = game->run_materials[q->material];
             q->progress = have < q->target ? have : q->target;
             if (q->progress < q->target)
                 return;
-            if (q->material != DROP_SINEW) {
-                q->material = DROP_SINEW;
-                q->target = zs->sinew_goal;
-                q->progress = game->material_sinew < q->target ? game->material_sinew : q->target;
+            if (q->material != (int)zs->material_b) {
+                q->material = (int)zs->material_b;
+                q->target = zs->goal_b;
+                q->progress = game->run_materials[q->material] < q->target
+                                  ? game->run_materials[q->material] : q->target;
                 continue;
             }
             q->kind = QUEST_DONE;
+            world_mark_complete(game);
             game->events |= GRAVE_EVT_QUEST_DONE | GRAVE_EVT_ZONE_DONE;
             if (game->phase == GAME_PHASE_PLAYING)
                 game->phase = GAME_PHASE_QUEST_COMPLETE;
@@ -1272,9 +1399,14 @@ void grave_game_init(GraveGame *game, uint32_t seed)
     game->player.alive = true;
     game->player.stamina = GRAVE_STAMINA_MAX;
     game->player.weapon = WEAPON_FLINTLOCK;
-    for (int i = 0; i < WEAPON_COUNT; i++)
+    game->player.reload_weapon = WEAPON_FLINTLOCK;
+    game->player.camera_first_person = false;
+    for (int i = 0; i < WEAPON_COUNT; i++) {
         game->player.ammo[i] = grave_weapon_spec((WeaponId)i)->magazine;
+        game->player.weapon_owned[i] = true; /* all v0.1/v0.2 guns are owned */
+    }
     game->quest.kind = QUEST_NONE;
+    grave_world_init(game);
     grave_update_camera(game, 400.0f / 240.0f);
 }
 
@@ -1282,12 +1414,28 @@ void grave_game_start_zone(GraveGame *game, ZoneId zone)
 {
     const ZoneSpec *zs;
     Player *p;
+    bool keep_first_person;
+    WeaponId keep_weapon;
+    bool keep_owned[WEAPON_COUNT];
 
     if (game == NULL)
         return;
-    if ((int)zone < 0 || (int)zone >= ZONE_COUNT)
-        zone = ZONE_ASHEN_MILL;
+    if (!valid_zone(zone))
+        return;
+    if (!game->world.nodes[zone].unlocked)
+        return; /* progression gate: locked zones cannot be entered */
     zs = grave_zone_spec(zone);
+
+    /* inventory carries across the trail: guns, camera preference and the
+     * material totals survive a zone start.  Only run-local state resets. */
+    keep_first_person = game->player.camera_first_person;
+    keep_weapon = game->player.weapon;
+    if ((int)keep_weapon < 0 || (int)keep_weapon >= WEAPON_COUNT)
+        keep_weapon = WEAPON_FLINTLOCK;
+    for (int i = 0; i < WEAPON_COUNT; i++)
+        keep_owned[i] = game->player.weapon_owned[i];
+    if (!keep_owned[keep_weapon])
+        keep_weapon = WEAPON_FLINTLOCK;
 
     memset(game->zombies, 0, sizeof(game->zombies));
     memset(game->pickups, 0, sizeof(game->pickups));
@@ -1301,15 +1449,19 @@ void grave_game_start_zone(GraveGame *game, ZoneId zone)
     p->hp = GRAVE_PLAYER_MAX_HP;
     p->alive = true;
     p->stamina = GRAVE_STAMINA_MAX;
-    p->weapon = WEAPON_FLINTLOCK;
-    p->reload_weapon = WEAPON_FLINTLOCK;
+    p->weapon = keep_weapon;
+    p->reload_weapon = keep_weapon;
+    p->camera_first_person = keep_first_person;
+    for (int i = 0; i < WEAPON_COUNT; i++) {
+        p->weapon_owned[i] = keep_owned[i];
+        p->ammo[i] = grave_weapon_spec((WeaponId)i)->magazine;
+    }
+    if (!p->weapon_owned[WEAPON_FLINTLOCK])
+        p->weapon_owned[WEAPON_FLINTLOCK] = true;
     p->transform.pos = vec3_make(0.0f, 0.0f, zs->half_extent - 4.5f);
-    p->transform.yaw = GRAVE_PI; /* facing into the yard, gate at our back */
+    p->transform.yaw = GRAVE_PI; /* facing into the zone, gate at our back */
     p->transform.pitch = 0.0f;
     p->on_ground = true;
-    p->camera_first_person = false;
-    for (int i = 0; i < WEAPON_COUNT; i++)
-        p->ammo[i] = grave_weapon_spec((WeaponId)i)->magazine;
 
     game->zone = zone;
     game->phase = GAME_PHASE_PLAYING;
@@ -1318,8 +1470,7 @@ void grave_game_start_zone(GraveGame *game, ZoneId zone)
     game->quest.target = zs->kill_goal;
     game->quest.progress = 0;
     game->quest.material = DROP_NONE;
-    game->material_coins = 0;
-    game->material_sinew = 0;
+    memset(game->run_materials, 0, sizeof(game->run_materials));
     game->zombies_alive = 0;
     game->zombies_killed = 0;
     game->zone_time = 0.0f;
@@ -1328,6 +1479,12 @@ void grave_game_start_zone(GraveGame *game, ZoneId zone)
     game->spawn_timer = 1.1f;
     game->spawn_budget = zs->spawn_budget;
     game->spawn_kill_goal = zs->kill_goal;
+    game->spawn_wave_left = 0;
+    game->spawn_wave_brutes = 0;
+    game->zone_runs++;
+
+    game->world.current = zone;
+    game->world.in_zone = true;
 
     build_zone_layout(game);
     grave_update_camera(game, 400.0f / 240.0f);
@@ -1358,6 +1515,7 @@ void grave_game_step(GraveGame *game, const GraveInput *input, float dt)
     p = &game->player;
     game->frame++;
     game->zone_time += dt;
+    game->total_time += dt;
 
     player_look(game, input);
     if (input->toggle_camera)
@@ -1467,4 +1625,331 @@ void grave_hero_root(const GraveGame *game, Vec3 *pos, float *yaw)
         *pos = game->player.transform.pos;
     if (yaw != NULL)
         *yaw = game->player.transform.yaw;
+}
+
+/* ================================================================== */
+/* v0.2: world progression                                             */
+/* ================================================================== */
+
+void grave_world_init(GraveGame *game)
+{
+    if (game == NULL)
+        return;
+    memset(&game->world, 0, sizeof(game->world));
+    for (int i = 0; i < ZONE_COUNT; i++)
+        game->world.nodes[i].zone = (ZoneId)i;
+    game->world.nodes[ZONE_ASHEN_MILL].unlocked = true;
+    game->world.current = ZONE_ASHEN_MILL;
+    game->world.in_zone = false;
+}
+
+bool grave_world_unlock(GraveGame *game, ZoneId zone)
+{
+    if (game == NULL || !valid_zone(zone))
+        return false;
+    game->world.nodes[zone].unlocked = true;
+    return true;
+}
+
+bool grave_world_unlocked(const GraveGame *game, ZoneId zone)
+{
+    if (game == NULL || !valid_zone(zone))
+        return false;
+    return game->world.nodes[zone].unlocked;
+}
+
+bool grave_world_cleared(const GraveGame *game, ZoneId zone)
+{
+    if (game == NULL || !valid_zone(zone))
+        return false;
+    return game->world.nodes[zone].cleared;
+}
+
+void grave_world_to_trail(GraveGame *game)
+{
+    if (game == NULL)
+        return;
+    game->world.in_zone = false;
+    game->phase = GAME_PHASE_TITLE;
+    game->events = 0u;
+}
+
+bool grave_game_travel_to(GraveGame *game, ZoneId zone)
+{
+    if (game == NULL || !valid_zone(zone))
+        return false;
+    if (!game->world.nodes[zone].unlocked)
+        return false;
+    grave_game_start_zone(game, zone);
+    return game->world.in_zone && game->zone == zone;
+}
+
+/* ================================================================== */
+/* v0.2: inventory helpers (PACK page)                                 */
+/* ================================================================== */
+
+bool grave_inventory_owned(const GraveGame *game, WeaponId id)
+{
+    if (game == NULL || (int)id < 0 || (int)id >= WEAPON_COUNT)
+        return false;
+    return game->player.weapon_owned[id];
+}
+
+int grave_inventory_weapon_count(const GraveGame *game)
+{
+    int count = 0;
+    if (game == NULL)
+        return 0;
+    for (int i = 0; i < WEAPON_COUNT; i++) {
+        if (game->player.weapon_owned[i])
+            count++;
+    }
+    return count;
+}
+
+int grave_inventory_ammo(const GraveGame *game, WeaponId id)
+{
+    if (game == NULL || (int)id < 0 || (int)id >= WEAPON_COUNT)
+        return 0;
+    return game->player.ammo[id];
+}
+
+int grave_inventory_material(const GraveGame *game, GraveDrop drop)
+{
+    if (game == NULL)
+        return 0;
+    switch (drop) {
+    case DROP_COIN:       return game->material_coins;
+    case DROP_SINEW:      return game->material_sinew;
+    case DROP_BONE_CHARM: return game->material_bone_charms;
+    default:              return 0;
+    }
+}
+
+/* ================================================================== */
+/* v0.2: save data                                                     */
+/* ================================================================== */
+
+/* If a future field changes the struct size, this stops compiling instead of
+ * silently writing a different number of bytes than GRAVE_SAVE_SIZE says. */
+typedef char grave_save_size_check[(sizeof(SaveData) == GRAVE_SAVE_SIZE) ? 1 : -1];
+
+static uint32_t save_checksum(const SaveData *sd)
+{
+    const unsigned char *bytes = (const unsigned char *)sd;
+    uint32_t hash = 2166136261u;
+
+    /* the checksum field itself is skipped; everything after it is covered */
+    for (size_t i = offsetof(SaveData, unlocked_mask); i < sizeof(SaveData); i++) {
+        hash ^= (uint32_t)bytes[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+int grave_save_size(void)
+{
+    return (int)sizeof(SaveData);
+}
+
+int grave_save_to_buffer(const GraveGame *game, const GraveSettings *settings,
+                         void *buf, int buf_size)
+{
+    SaveData sd;
+
+    if (game == NULL || buf == NULL)
+        return 0;
+    if (buf_size < (int)sizeof(SaveData))
+        return 0;
+
+    memset(&sd, 0, sizeof(sd)); /* deterministic image: padding stays zero */
+    sd.magic = GRAVE_SAVE_MAGIC;
+    sd.version = (uint16_t)GRAVE_SAVE_VERSION;
+    sd.bytes = (uint16_t)sizeof(SaveData);
+
+    for (int i = 0; i < ZONE_COUNT; i++) {
+        const ZoneNode *node = &game->world.nodes[i];
+        if (node->unlocked)
+            sd.unlocked_mask |= 1u << i;
+        if (node->cleared) {
+            sd.cleared_mask |= 1u << i;
+            sd.unlocked_mask |= 1u << i;
+        }
+        sd.zone_clears[i] = (uint8_t)(node->clears < 0 ? 0
+                                      : (node->clears > 255 ? 255 : node->clears));
+        sd.zone_best_time[i] = node->best_time > 0.0f ? node->best_time : 0.0f;
+    }
+    sd.current_zone = valid_zone(game->world.current) ? (uint8_t)game->world.current
+                                                     : (uint8_t)ZONE_ASHEN_MILL;
+    sd.camera_first_person = game->player.camera_first_person ? 1u : 0u;
+    if (settings != NULL) {
+        sd.invert_y = settings->invert_y ? 1u : 0u;
+        sd.touch_sens = settings->touch_sens;
+        sd.muted = settings->muted ? 1u : 0u;
+    }
+
+    for (int i = 0; i < WEAPON_COUNT; i++) {
+        const WeaponSpec *spec = grave_weapon_spec((WeaponId)i);
+        int ammo = game->player.ammo[i];
+        if (ammo < 0) ammo = 0;
+        if (ammo > spec->magazine) ammo = spec->magazine;
+        sd.weapon_owned[i] = game->player.weapon_owned[i] ? 1u : 0u;
+        sd.ammo[i] = ammo;
+    }
+
+    sd.material_coins = game->material_coins > 0 ? game->material_coins : 0;
+    sd.material_sinew = game->material_sinew > 0 ? game->material_sinew : 0;
+    sd.material_bone_charms = game->material_bone_charms > 0
+                                  ? game->material_bone_charms : 0;
+    sd.kills_total = game->total_kills > 0 ? (uint32_t)game->total_kills : 0u;
+    sd.runs = game->zone_runs > 0 ? (uint32_t)game->zone_runs : 0u;
+    sd.play_time = game->total_time > 0.0f ? game->total_time : 0.0f;
+
+    sd.checksum = save_checksum(&sd);
+    memcpy(buf, &sd, sizeof(sd));
+    return (int)sizeof(sd);
+}
+
+bool grave_load_from_buffer(GraveGame *game, GraveSettings *settings_out,
+                            const void *buf, int buf_size)
+{
+    SaveData sd;
+    World world;
+    bool owned[WEAPON_COUNT];
+    int ammo[WEAPON_COUNT];
+    int owned_count = 0;
+    uint32_t valid_mask;
+    int weapon;
+
+    if (game == NULL || buf == NULL)
+        return false;
+    if (buf_size < (int)sizeof(SaveData))
+        return false;
+    memcpy(&sd, buf, sizeof(sd)); /* buf may be unaligned */
+
+    if (sd.magic != GRAVE_SAVE_MAGIC)
+        return false;
+    if (sd.version != (uint16_t)GRAVE_SAVE_VERSION)
+        return false;
+    if (sd.bytes != (uint16_t)sizeof(SaveData))
+        return false;
+    if (sd.checksum != save_checksum(&sd))
+        return false;
+
+    valid_mask = (1u << ZONE_COUNT) - 1u;
+    if ((sd.unlocked_mask & ~valid_mask) != 0u ||
+        (sd.cleared_mask & ~valid_mask) != 0u)
+        return false;
+
+    /* build the world image first; nothing below this point can fail */
+    memset(&world, 0, sizeof(world));
+    for (int i = 0; i < ZONE_COUNT; i++) {
+        ZoneNode *node = &world.nodes[i];
+        node->zone = (ZoneId)i;
+        node->unlocked = (sd.unlocked_mask & (1u << i)) != 0u;
+        node->cleared = (sd.cleared_mask & (1u << i)) != 0u;
+        if (node->cleared)
+            node->unlocked = true; /* a cleared zone is always travelable */
+        node->clears = (int)sd.zone_clears[i];
+        node->best_time = sd.zone_best_time[i] > 0.0f ? sd.zone_best_time[i] : 0.0f;
+    }
+    if (!world.nodes[ZONE_ASHEN_MILL].unlocked) {
+        /* keep the valley playable even if a writer forgot the first stop */
+        world.nodes[ZONE_ASHEN_MILL].unlocked = true;
+        sd.unlocked_mask |= 1u;
+    }
+    world.current = (sd.current_zone < (uint8_t)ZONE_COUNT &&
+                     world.nodes[sd.current_zone].unlocked)
+                        ? (ZoneId)sd.current_zone
+                        : ZONE_ASHEN_MILL;
+    world.in_zone = false;
+
+    for (int i = 0; i < WEAPON_COUNT; i++) {
+        const WeaponSpec *spec = grave_weapon_spec((WeaponId)i);
+        owned[i] = sd.weapon_owned[i] != 0u;
+        if (owned[i])
+            owned_count++;
+        ammo[i] = (int)sd.ammo[i];
+        if (ammo[i] < 0) ammo[i] = 0;
+        if (ammo[i] > spec->magazine) ammo[i] = spec->magazine;
+    }
+    if (owned_count == 0)
+        owned[WEAPON_FLINTLOCK] = true;
+    weapon = owned[WEAPON_FLINTLOCK] ? (int)WEAPON_FLINTLOCK : -1;
+    for (int i = 0; i < WEAPON_COUNT && weapon < 0; i++) {
+        if (owned[i])
+            weapon = i;
+    }
+    if (weapon < 0)
+        weapon = (int)WEAPON_FLINTLOCK;
+
+    if (settings_out != NULL) {
+        memset(settings_out, 0, sizeof(*settings_out));
+        settings_out->invert_y = sd.invert_y ? 1u : 0u;
+        settings_out->touch_sens = sd.touch_sens;
+        settings_out->muted = sd.muted ? 1u : 0u;
+    }
+
+    /* ---- apply ---- */
+    game->world = world;
+    game->material_coins = sd.material_coins > 0 ? (int)sd.material_coins : 0;
+    game->material_sinew = sd.material_sinew > 0 ? (int)sd.material_sinew : 0;
+    game->material_bone_charms = sd.material_bone_charms > 0
+                                    ? (int)sd.material_bone_charms : 0;
+    game->total_kills = sd.kills_total > 0x7FFFFFFFu
+                            ? 0x7FFFFFFF : (int)sd.kills_total;
+    game->zone_runs = sd.runs > 0x7FFFFFFFu ? 0x7FFFFFFF : (int)sd.runs;
+    game->total_time = sd.play_time > 0.0f ? sd.play_time : 0.0f;
+
+    game->player.camera_first_person = sd.camera_first_person != 0u;
+    for (int i = 0; i < WEAPON_COUNT; i++) {
+        game->player.weapon_owned[i] = owned[i];
+        game->player.ammo[i] = ammo[i];
+    }
+    game->player.weapon = (WeaponId)weapon;
+    game->player.reload_weapon = (WeaponId)weapon;
+
+    /* a save is loaded at boot / on the trail, so drop any live run state */
+    memset(game->zombies, 0, sizeof(game->zombies));
+    memset(game->pickups, 0, sizeof(game->pickups));
+    memset(game->props, 0, sizeof(game->props));
+    memset(game->shot_traces, 0, sizeof(game->shot_traces));
+    memset(game->run_materials, 0, sizeof(game->run_materials));
+    game->prop_count = 0;
+    game->zombies_alive = 0;
+    game->zombies_killed = 0;
+    game->zone_time = 0.0f;
+    game->frame = 0;
+    game->events = 0u;
+    game->spawn_timer = 0.0f;
+    game->spawn_budget = 0;
+    game->spawn_kill_goal = 0;
+    game->spawn_wave_left = 0;
+    game->spawn_wave_brutes = 0;
+    game->quest.kind = QUEST_NONE;
+    game->quest.target = 0;
+    game->quest.progress = 0;
+    game->quest.material = DROP_NONE;
+
+    game->player.max_hp = GRAVE_PLAYER_MAX_HP;
+    game->player.hp = GRAVE_PLAYER_MAX_HP;
+    game->player.alive = true;
+    game->player.stamina = GRAVE_STAMINA_MAX;
+    game->player.velocity_y = 0.0f;
+    game->player.on_ground = true;
+    game->player.transform.pos = vec3_make(0.0f, 0.0f, 0.0f);
+    game->player.transform.yaw = 0.0f;
+    game->player.transform.pitch = 0.0f;
+    game->player.reload_timer = 0.0f;
+    game->player.fire_cooldown = 0.0f;
+    game->player.recoil = 0.0f;
+    game->player.anim_time = 0.0f;
+    game->player.anim_speed = 0.0f;
+    game->player.firing = false;
+    game->player.muzzle_flash = 0.0f;
+
+    game->phase = GAME_PHASE_TITLE;
+    game->zone = world.current;
+    grave_update_camera(game, 400.0f / 240.0f);
+    return true;
 }
