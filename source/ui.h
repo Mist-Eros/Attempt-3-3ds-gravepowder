@@ -1,12 +1,21 @@
 /*
  * Gravepowder - bottom screen UI (citro2d)
  *
- * Old-paper / weathered Western look: bone, brass and ink with red accents for
- * danger.  All clickable areas are exposed as ui_*_rect() accessors so the app
- * layer and tooling can hit-test without duplicating layout constants.
+ * The bottom screen is a paged info display: a slim always-on status strip
+ * (health / ammo / weapon / pause), a three-tab bar (AREA / WORLD / PACK) and
+ * one full page below it.  Everything uses the weathered-paper Western look:
+ * bone, brass and ink with blood-red accents for danger.  Pause, settings and
+ * the result pages still overlay the whole screen.
+ *
+ * All clickable areas are exposed as ui_*_rect() accessors so the app layer and
+ * tooling can hit-test without duplicating layout constants.
  */
 #ifndef GRAVEPOWDER_UI_H
 #define GRAVEPOWDER_UI_H
+
+/* Release version shown in the UI footer.  Single source of truth: bump this
+ * one macro per release (no other file hard-codes the version string). */
+#define GRAVEPOWDER_VERSION "v0.2"
 
 #include <stdbool.h>
 
@@ -15,22 +24,28 @@
 #define UI_SCREEN_W 320
 #define UI_SCREEN_H 240
 
+/* Slide transition when switching tabs, in seconds. */
+#define UI_TAB_TRANSITION_TIME 0.15f
+
 /* UI actions returned by ui_hit_test(). */
 typedef enum {
     UI_ACTION_NONE = 0,
     UI_ACTION_START,          /* title prompt / tap anywhere on title     */
-    UI_ACTION_PAUSE,          /* HUD pause button                         */
+    UI_ACTION_PAUSE,          /* status strip pause button                */
     UI_ACTION_RESUME,         /* pause -> resume                          */
     UI_ACTION_RESTART,        /* pause -> restart zone                    */
     UI_ACTION_SETTINGS,       /* pause -> settings page                   */
     UI_ACTION_SETTINGS_BACK,  /* settings -> pause                        */
     UI_ACTION_QUIT_TITLE,     /* pause -> title                           */
-    UI_ACTION_WEAPON,         /* arg = weapon index (0..WEAPON_COUNT-1)   */
+    UI_ACTION_TAB,            /* arg = AppTab to show                     */
+    UI_ACTION_WEAPON,         /* arg = weapon index: equip (PACK cards)   */
+    UI_ACTION_WORLD_NODE,     /* arg = ZoneId node tapped on WORLD map    */
     UI_ACTION_TOGGLE_CAMERA,  /* settings: first/third person             */
     UI_ACTION_CYCLE_SENS,     /* settings: touch sensitivity preset       */
     UI_ACTION_TOGGLE_INVERT,  /* settings: invert Y                       */
     UI_ACTION_TOGGLE_MUTE,    /* settings: mute audio                     */
-    UI_ACTION_CONTINUE,       /* zone-clear -> title                      */
+    UI_ACTION_CONTINUE,       /* zone-clear -> title screen               */
+    UI_ACTION_TRAVEL_ON,      /* zone-clear -> stay on the WORLD map page */
     UI_ACTION_RETRY           /* game-over -> restart zone                */
 } UiAction;
 
@@ -46,20 +61,39 @@ void ui_draw(const App *app);
  * Returns true when an action was hit (action/arg filled in). */
 bool ui_hit_test(const App *app, int px, int py, int *action, int *arg);
 
-/* --- layout accessors (shared by app/ui; safe for preview tooling) ------- */
+/* --- layout accessors (shared by app/ui; safe for tooling) --------------- */
+/* Always-on status strip + tab bar. */
 UiRect ui_pause_rect(void);
-UiRect ui_weapon_slot_rect(int index);
+UiRect ui_tab_rect(int tab);
+/* AREA page. */
+UiRect ui_area_map_rect(void);
+/* WORLD page node hitboxes: index == ZoneId (0 Ashen Mill, 1 Bone Orchard,
+ * 2 Old Mine).  All nodes are returned; locked nodes are still hit-tested so
+ * the map geometry is stable and the app can ignore locked taps. */
+#define UI_WORLD_NODE_COUNT (ZONE_COUNT)
+UiRect ui_world_node_rect(int node);
+/* PACK page: weapon cards (same order as WeaponId). */
+UiRect ui_pack_weapon_rect(int index);
+
+/* Title page. */
 UiRect ui_title_start_rect(void);
+/* Pause menu. */
 UiRect ui_pause_resume_rect(void);
 UiRect ui_pause_restart_rect(void);
 UiRect ui_pause_settings_rect(void);
 UiRect ui_pause_quit_rect(void);
+/* Settings rows. */
 UiRect ui_settings_back_rect(void);
 UiRect ui_settings_camera_rect(void);
 UiRect ui_settings_sens_rect(void);
 UiRect ui_settings_invert_rect(void);
 UiRect ui_settings_mute_rect(void);
-UiRect ui_results_continue_rect(void);
+/* Result pages. */
+UiRect ui_results_continue_rect(void);   /* "TITLE" button                    */
+UiRect ui_results_travel_rect(void);     /* "TRAVEL ON" -> WORLD map page     */
 UiRect ui_gameover_retry_rect(void);
+
+/* Legacy alias: the old HUD weapon slots are now the PACK weapon cards. */
+UiRect ui_weapon_slot_rect(int index);
 
 #endif /* GRAVEPOWDER_UI_H */

@@ -33,6 +33,14 @@ enum {
     APP_SENS_COUNT
 };
 
+/* Bottom-screen info tabs (the HUD page is now a paged info display). */
+typedef enum {
+    APP_TAB_AREA = 0,   /* top-down map of the current zone            */
+    APP_TAB_WORLD,      /* valley map / zone nodes                     */
+    APP_TAB_PACK,       /* weapons, materials, character stats         */
+    APP_TAB_COUNT
+} AppTab;
+
 struct App {
     /* Portable simulation state. */
     GraveGame game;
@@ -49,6 +57,11 @@ struct App {
     float hit_flash;         /* damage feedback timer (0..1 fade)          */
     float prev_hp;
 
+    /* Bottom-screen paging. */
+    AppTab tab;              /* current info tab                            */
+    AppTab tab_prev;         /* tab that is sliding out (transition)        */
+    float tab_anim;          /* remaining transition time (0 = idle)        */
+
     /* Touch state machine (drag = aim, short tap = UI). */
     bool touch_active;
     bool touch_dragging;
@@ -58,10 +71,9 @@ struct App {
     int touch_start_y;
     float touch_travel;      /* total movement in px, distinguishes tap    */
 
-    /* Settings (RAM only for v0.1). */
-    int touch_sens;          /* APP_SENS_*                               */
-    bool invert_y;
-    bool muted;
+    /* Front-end settings.  This is the persisted GraveSettings image the
+     * core save buffer serialises, so it is the single source of truth. */
+    GraveSettings settings;  /* invert_y, touch_sens, muted, reserved   */
 
     /* Result snapshot so the zone-clear page keeps its numbers. */
     float result_time;
