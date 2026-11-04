@@ -1164,15 +1164,15 @@ void mesh_build_hero_rig(HeroRig *rig, MeshArena *arena,
 
     /* 17/18/19: bushy tail */
     mesh_builder_begin(&b, scratch, scratch_cap);
-    hero_tail_seg(&b, &id, 0.0f, -0.11f, 0.062f, 0.062f, 0.11f, H_FUR);
+    hero_tail_seg(&b, &id, 0.0f, -0.12f, 0.075f, 0.075f, 0.12f, H_FUR);
     part_commit(rig, 17, &b, arena, 0, RIG_CH_TAIL_A, 0.0f, 0.02f, -0.11f);
 
     mesh_builder_begin(&b, scratch, scratch_cap);
-    hero_tail_seg(&b, &id, -0.02f, -0.10f, 0.092f, 0.092f, 0.10f, H_FUR);
+    hero_tail_seg(&b, &id, -0.02f, -0.11f, 0.115f, 0.115f, 0.11f, H_FUR);
     part_commit(rig, 18, &b, arena, 17, RIG_CH_TAIL_B, 0.0f, 0.0f, -0.19f);
 
     mesh_builder_begin(&b, scratch, scratch_cap);
-    hero_tail_seg(&b, &id, -0.02f, -0.075f, 0.062f, 0.062f, 0.085f, H_CREAM);
+    hero_tail_seg(&b, &id, -0.02f, -0.085f, 0.078f, 0.078f, 0.095f, H_CREAM);
     part_commit(rig, 19, &b, arena, 18, RIG_CH_TAIL_B, 0.0f, -0.01f, -0.17f);
 }
 

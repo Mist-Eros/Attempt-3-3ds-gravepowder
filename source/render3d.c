@@ -494,9 +494,9 @@ static void camera_basis(const Vec3 *pos, const Vec3 *look,
 static const float s_muzzle_z[WEAPON_COUNT] = { 0.21f, 0.21f, 0.60f };
 
 /* first person viewmodel placement (camera space) */
-static const float s_vm_x[WEAPON_COUNT] = { 0.155f, 0.155f, 0.165f };
+static const float s_vm_x[WEAPON_COUNT] = { 0.200f, 0.200f, 0.210f };
 static const float s_vm_y[WEAPON_COUNT] = { -0.145f, -0.140f, -0.165f };
-static const float s_vm_z[WEAPON_COUNT] = { -0.34f, -0.32f, -0.44f };
+static const float s_vm_z[WEAPON_COUNT] = { -0.36f, -0.34f, -0.46f };
 
 static WeaponId clamp_weapon(WeaponId w)
 {
@@ -544,15 +544,17 @@ static void hero_pose_angles(const Player *player, float t, bool idle_only,
     angles[RIG_CH_COAT_A].x = 0.12f + 0.28f * speed * sinf(phase + PI_F);
     angles[RIG_CH_COAT_B].x = 0.12f + 0.28f * speed * sinf(phase + PI_F + 0.5f);
 
-    angles[RIG_CH_TAIL_A].x = 0.34f + 0.06f * sinf(t * 2.2f);
+    /* tail hangs down behind the coat (local -Z) and sways */
+    angles[RIG_CH_TAIL_A].x = -0.55f + 0.07f * sinf(t * 2.2f);
     angles[RIG_CH_TAIL_A].y = 0.22f * sinf(t * 1.4f);
-    angles[RIG_CH_TAIL_B].x = 0.22f;
+    angles[RIG_CH_TAIL_B].x = 0.18f + 0.05f * sinf(t * 1.9f + 0.7f);
     angles[RIG_CH_TAIL_B].y = 0.26f * sinf(t * 1.9f + 0.7f);
 }
 
-/* Draws the hero rig.  Returns the gun-hand world matrix (for the weapon). */
-static bool hero_draw(const Player *player, const C3D_Mtx *view, float t,
-                      bool idle_only, C3D_Mtx *hand_world)
+/* Draws the hero rig and its third-person weapon.  Writes the world-space
+ * muzzle position when `muzzle` is non-NULL. */
+static void hero_draw(const Player *player, const C3D_Mtx *view, float t,
+                      bool idle_only, WeaponId weapon, Vec3 *muzzle)
 {
     const HeroRig *rig = s_hero_rig;
     Vec3 angles[RIG_CH_COUNT];
@@ -562,6 +564,7 @@ static bool hero_draw(const Player *player, const C3D_Mtx *view, float t,
     Vec3 pos = player->transform.pos;
     float yaw = player->transform.yaw;
     float scale = rig->scale > 0.01f ? rig->scale : 1.0f;
+    WeaponId w = clamp_weapon(weapon);
     int i;
 
     hero_pose_angles(player, t, idle_only, angles, &bob);
@@ -585,7 +588,8 @@ static bool hero_draw(const Player *player, const C3D_Mtx *view, float t,
         if (part->parent >= 0 && part->parent < i) {
             Mtx_Multiply(&world[i], &world[part->parent], &local);
         } else {
-            world[i] = local;
+            /* root part: its parent space is hero-local, so apply the hero root */
+            Mtx_Multiply(&world[i], &root, &local);
         }
     }
 
@@ -593,19 +597,26 @@ static bool hero_draw(const Player *player, const C3D_Mtx *view, float t,
         draw_model(view, &rig->part[i].mesh, &world[i], 1.0f, 1.0f, 1.0f, 0.0f);
     }
 
-    if (rig->gun_hand >= 0 && rig->gun_hand < rig->part_count) {
-        *hand_world = world[rig->gun_hand];
-        return true;
-    }
-    return false;
-}
+    /* third-person weapon: held at the right hip, barrel towards hero-forward.
+     * Rig parts are in hero-local metres, so mount from the root instead of the
+     * animated hand chain to keep the silhouette readable and the barrel level. */
+    {
+        C3D_Mtx local, gun_world;
 
-/* local transform from the hand joint to the weapon grip */
-static void gun_mount(C3D_Mtx *m)
-{
-    Mtx_Identity(m);
-    Mtx_Translate(m, 0.0f, -0.05f, 0.02f, true);
-    Mtx_RotateX(m, 0.12f, true);
+        Mtx_Identity(&local);
+        Mtx_Translate(&local, 0.33f, 0.99f, 0.06f, true);
+        Mtx_RotateY(&local, 0.55f, true);
+        Mtx_RotateX(&local, -0.03f, true);
+        Mtx_Multiply(&gun_world, &root, &local);
+        Mtx_Scale(&gun_world, 1.25f, 1.25f, 1.25f);
+        draw_model(view, &s_weapons[w], &gun_world, 1.0f, 1.0f, 1.0f, 0.10f);
+
+        if (muzzle != NULL) {
+            C3D_FVec mp = Mtx_MultiplyFVecH(&gun_world,
+                                            FVec3_New(0.0f, 0.028f, s_muzzle_z[w]));
+            *muzzle = v3(mp.x, mp.y, mp.z);
+        }
+    }
 }
 
 static void draw_first_person_gun(const GraveGame *game, WeaponId weapon)
@@ -629,7 +640,8 @@ static void draw_first_person_gun(const GraveGame *game, WeaponId weapon)
     Mtx_RotateX(&model, recoil * 1.8f + kick * 0.12f, true);
     Mtx_RotateZ(&model, sway_x * 0.6f, true);
 
-    draw_mesh_mv(&model, &s_weapons[weapon], 1.0f, 1.0f, 1.0f, 0.15f);
+    Mtx_Scale(&model, 1.25f, 1.25f, 1.25f);
+    draw_mesh_mv(&model, &s_weapons[weapon], 1.0f, 1.0f, 1.0f, 0.18f);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1013,7 +1025,7 @@ static void begin_additive(void)
 {
     C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD,
                    GPU_ONE, GPU_ONE, GPU_ONE, GPU_ONE);
-    C3D_DepthTest(true, GPU_GREATER, 0);
+    C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_COLOR);
     C3D_CullFace(GPU_CULL_NONE);
 }
 
@@ -1051,7 +1063,7 @@ static void draw_crosshair(void)
 
     Mtx_Identity(&identity);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_u_projection, &s_ortho);
-    C3D_DepthTest(false, GPU_ALWAYS, 0);
+    C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
     dyn_flush(&identity, 1.0f, 1.0f, 1.0f, 1.0f);
 }
 
@@ -1059,36 +1071,19 @@ static void draw_crosshair(void)
 /* world drawing                                                      */
 /* ------------------------------------------------------------------ */
 
-static Vec3 weapon_muzzle_world(WeaponId weapon, bool first_person,
-                                const Vec3 *cam_pos, const Vec3 *fwd,
-                                const Vec3 *right, const Vec3 *up,
-                                const C3D_Mtx *hand_world, bool hand_valid)
+static Vec3 weapon_muzzle_world(WeaponId weapon, const Vec3 *cam_pos,
+                                const Vec3 *fwd, const Vec3 *right,
+                                const Vec3 *up)
 {
     WeaponId w = clamp_weapon(weapon);
+    /* mirror the viewmodel transform: the gun is rotated 180 deg around Y,
+     * so its local +Z barrel ends up `muzzle_z - vm_z` metres ahead. */
+    float depth = s_muzzle_z[w] - s_vm_z[w];
+    Vec3 p = v3_add(*cam_pos, v3_scale(*fwd, depth));
 
-    if (first_person) {
-        /* mirror the viewmodel transform: the gun is rotated 180 deg around Y,
-         * so its local +Z barrel ends up `muzzle_z - vm_z` metres ahead. */
-        float depth = s_muzzle_z[w] - s_vm_z[w];
-        Vec3 p = v3_add(*cam_pos, v3_scale(*fwd, depth));
-        p = v3_add(p, v3_scale(*right, s_vm_x[w]));
-        p = v3_add(p, v3_scale(*up, s_vm_y[w] + 0.03f));
-        return p;
-    }
-
-    if (hand_valid) {
-        C3D_Mtx mount;
-        C3D_FVec local, in_hand, world;
-
-        gun_mount(&mount);
-        /* gun mesh is drawn at hand * mount * scale(1.18) */
-        local = FVec3_New(0.0f, 0.028f * 1.18f, s_muzzle_z[w] * 1.18f);
-        in_hand = Mtx_MultiplyFVecH(&mount, local);
-        world = Mtx_MultiplyFVecH(hand_world, in_hand);
-        return v3(world.x, world.y, world.z);
-    }
-
-    return v3_add(*cam_pos, v3_scale(*fwd, 1.0f));
+    p = v3_add(p, v3_scale(*right, s_vm_x[w]));
+    p = v3_add(p, v3_scale(*up, s_vm_y[w] + 0.03f));
+    return p;
 }
 
 static void draw_world_geometry(const GraveGame *game, const C3D_Mtx *view,
@@ -1097,8 +1092,6 @@ static void draw_world_geometry(const GraveGame *game, const C3D_Mtx *view,
                                 const Vec3 *right, const Vec3 *up,
                                 Vec3 *muzzle_out, bool *muzzle_valid)
 {
-    C3D_Mtx hand_world;
-    bool hand_valid = false;
     Vec3 muzzle;
 
     /* first person: viewmodel goes in before the world so it is never clipped
@@ -1124,26 +1117,17 @@ static void draw_world_geometry(const GraveGame *game, const C3D_Mtx *view,
     /* pickups */
     draw_pickups(game, view);
 
-    /* hero + hand gun (third person) */
-    if (!first_person) {
-        hand_valid = hero_draw(&game->player, view, game->zone_time, false,
-                               &hand_world);
-        if (hand_valid) {
-            C3D_Mtx mount, gun_world;
-            gun_mount(&mount);
-            Mtx_Multiply(&gun_world, &hand_world, &mount);
-            Mtx_Scale(&gun_world, 1.18f, 1.18f, 1.18f);
-            draw_model(view, &s_weapons[weapon], &gun_world,
-                       1.0f, 1.0f, 1.0f, 0.10f);
-        }
+    /* weapon muzzle in the world, for flash + smoke */
+    if (first_person) {
+        muzzle = weapon_muzzle_world(weapon, cam_pos, fwd, right, up);
+    } else {
+        muzzle = v3_add(game->player.transform.pos, v3(0.0f, 1.2f, 0.0f));
+        hero_draw(&game->player, view, game->zone_time, false, weapon, &muzzle);
     }
 
     /* zombies */
     draw_zombies(game, view);
 
-    /* weapon muzzle in the world, for flash + smoke */
-    muzzle = weapon_muzzle_world(weapon, first_person, cam_pos, fwd, right, up,
-                                 &hand_world, hand_valid);
     *muzzle_out = muzzle;
     *muzzle_valid = true;
 
@@ -1225,14 +1209,13 @@ static void draw_title_diorama(const GraveGame *game, const Vec3 *cam_pos,
     };
     const HeroRig *rig = s_hero_rig;
     Player hero;
-    C3D_Mtx hand_world;
     int i;
 
     memset(&hero, 0, sizeof(hero));
     hero.transform.pos = v3(1.15f, 0.0f, 1.15f);
     hero.transform.yaw = atan2f(cam_pos->x - hero.transform.pos.x,
                                 cam_pos->z - hero.transform.pos.z);
-    hero.transform.pitch = 0.16f;   /* chin up: shows the muzzle under the hat */
+    hero.transform.pitch = 0.20f;   /* chin up: shows the muzzle under the hat */
     hero.anim_time = s_title_clock;
     hero.anim_speed = 0.0f;
     hero.weapon = WEAPON_REVOLVER;
@@ -1273,7 +1256,7 @@ static void draw_title_diorama(const GraveGame *game, const Vec3 *cam_pos,
     }
 
     if (rig != NULL) {
-        (void)hero_draw(&hero, view, s_title_clock, true, &hand_world);
+        hero_draw(&hero, view, s_title_clock, true, WEAPON_REVOLVER, NULL);
     }
 
     /* shamblers drifting through the fog, walking towards the hero */
@@ -1550,10 +1533,10 @@ void r3d_draw_world(const GraveGame *game, float dt)
     if (title) {
         float a = 0.34f + 0.10f * sinf(s_title_clock * 0.085f);
         float radius = 4.5f;
-        title_pos = v3(sinf(a) * radius - 0.55f,
-                       1.55f + 0.05f * sinf(s_title_clock * 0.13f),
+        title_pos = v3(sinf(a) * radius - 0.60f,
+                       1.42f + 0.05f * sinf(s_title_clock * 0.13f),
                        cosf(a) * radius);
-        title_look = v3(0.35f, 1.08f, 0.30f);
+        title_look = v3(0.30f, 1.12f, 0.30f);
         cam_pos = title_pos;
         cam_look = title_look;
         fov = 52.0f;
