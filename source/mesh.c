@@ -1113,39 +1113,56 @@ void mesh_build_wolf_head(Mesh *out, MeshArena *arena,
     mesh_builder_begin(&b, scratch, scratch_cap);
     xf_reset(&id);
 
-    /* skull + snout */
-    mesh_builder_box(&b, &id, 0.0f, 0.0f, 0.0f, 0.105f, 0.095f, 0.10f,
+    /* cranium */
+    mesh_builder_box(&b, &id, 0.0f, 0.010f, 0.0f, 0.108f, 0.098f, 0.105f,
                      H_FUR[0], H_FUR[1], H_FUR[2]);
-    mesh_builder_box(&b, &id, 0.0f, -0.028f, 0.135f, 0.060f, 0.045f, 0.090f,
+    /* brow ridge */
+    mesh_builder_box(&b, &id, 0.0f, 0.058f, 0.086f, 0.100f, 0.030f, 0.040f,
+                     H_FUR[0], H_FUR[1], H_FUR[2]);
+    /* long snout + nose + jaw */
+    mesh_builder_box(&b, &id, 0.0f, -0.030f, 0.150f, 0.060f, 0.046f, 0.098f,
                      H_CREAM[0], H_CREAM[1], H_CREAM[2]);
-    mesh_builder_box(&b, &id, 0.0f, -0.008f, 0.222f, 0.026f, 0.020f, 0.018f,
+    mesh_builder_box(&b, &id, 0.0f, -0.004f, 0.250f, 0.030f, 0.024f, 0.022f,
                      H_NOSE[0], H_NOSE[1], H_NOSE[2]);
-    mesh_builder_box(&b, &id, 0.0f, -0.082f, 0.10f, 0.045f, 0.020f, 0.060f,
+    mesh_builder_box(&b, &id, 0.0f, -0.086f, 0.118f, 0.048f, 0.022f, 0.082f,
                      H_CREAM_DARK[0], H_CREAM_DARK[1], H_CREAM_DARK[2]);
 
     for (side = -1; side <= 1; side += 2) {
+        /* cheek ruff: big angled fur wedge that breaks up the cube silhouette */
         xf_reset(&m);
-        Mtx_Translate(&m, 0.082f * (float)side, 0.100f, -0.02f, true);
-        Mtx_RotateZ(&m, -0.22f * (float)side, true);
-        mesh_builder_cone(&b, &m, 0.0f, 0.0f, 0.0f, 0.052f, 0.0f, 0.17f, 3, true,
+        Mtx_Translate(&m, 0.095f * (float)side, -0.045f, 0.015f, true);
+        Mtx_RotateZ(&m, -0.34f * (float)side, true);
+        mesh_builder_box(&b, &m, 0.0f, 0.0f, 0.0f, 0.055f, 0.085f, 0.080f,
+                         H_FUR[0], H_FUR[1], H_FUR[2]);
+        mesh_builder_box(&b, &m, 0.020f * (float)side, -0.050f, 0.045f,
+                         0.045f, 0.045f, 0.050f,
+                         H_CREAM_DARK[0], H_CREAM_DARK[1], H_CREAM_DARK[2]);
+
+        /* tall ears, splayed outward well past the hat brim */
+        xf_reset(&m);
+        Mtx_Translate(&m, 0.112f * (float)side, 0.112f, -0.010f, true);
+        Mtx_RotateZ(&m, -0.40f * (float)side, true);
+        Mtx_RotateX(&m, -0.10f, true);
+        mesh_builder_cone(&b, &m, 0.0f, 0.0f, 0.0f, 0.075f, 0.0f, 0.30f, 3, true,
                           H_FUR[0], H_FUR[1], H_FUR[2]);
-        mesh_builder_cone(&b, &m, 0.0f, 0.012f, 0.014f, 0.030f, 0.0f, 0.11f, 3, true,
+        mesh_builder_cone(&b, &m, 0.0f, 0.014f, 0.020f, 0.044f, 0.0f, 0.20f, 3, true,
                           H_CREAM_DARK[0], H_CREAM_DARK[1], H_CREAM_DARK[2]);
+
         /* amber eyes + dark brows */
-        mesh_builder_quad(&b, &id, 0.052f * (float)side, 0.020f, 0.101f,
-                          0.020f, 0.013f,
+        mesh_builder_quad(&b, &id, 0.055f * (float)side, 0.022f, 0.110f,
+                          0.024f, 0.016f,
                           H_EYE[0], H_EYE[1], H_EYE[2]);
-        mesh_builder_box(&b, &id, 0.052f * (float)side, 0.046f, 0.10f,
-                         0.028f, 0.011f, 0.012f,
+        mesh_builder_box(&b, &id, 0.055f * (float)side, 0.052f, 0.104f,
+                         0.032f, 0.010f, 0.005f,
                          H_FUR_DARK[0], H_FUR_DARK[1], H_FUR_DARK[2]);
     }
 
-    /* battered hat */
-    mesh_builder_cyl(&b, &id, 0.0f, 0.110f, -0.005f, 0.168f, 0.022f, 10, true,
+    /* battered narrow-brim hat, sitting back so the ears stay clear */
+    mesh_builder_cyl(&b, &id, 0.0f, 0.138f, -0.012f, 0.133f, 0.018f, 10, true,
                      H_HAT[0], H_HAT[1], H_HAT[2]);
-    mesh_builder_cyl(&b, &id, 0.0f, 0.125f, -0.005f, 0.108f, 0.030f, 8, false,
+    mesh_builder_cyl(&b, &id, 0.0f, 0.152f, -0.012f, 0.094f, 0.026f, 8, false,
                      H_HATBAND[0], H_HATBAND[1], H_HATBAND[2]);
-    mesh_builder_cone(&b, &id, 0.0f, 0.185f, -0.005f, 0.107f, 0.090f, 0.115f, 8,
+    mesh_builder_cone(&b, &id, 0.0f, 0.212f, -0.012f, 0.092f, 0.078f, 0.105f, 8,
                       true, H_HAT[0], H_HAT[1], H_HAT[2]);
 
     (void)mesh_commit(&b, out, arena);
@@ -1158,10 +1175,12 @@ void mesh_build_wolf_tail(Mesh out[3], MeshArena *arena,
     C3D_Mtx id;
     int i;
 
+    /* full lengths 0.20 / 0.18 / 0.15 m, widening at the middle and tapering
+     * to the cream tip: a ~0.5 m bushy tail. */
     static const float seg_half[3][3] = {
-        { 0.070f, 0.070f, 0.110f },
-        { 0.100f, 0.100f, 0.100f },
-        { 0.065f, 0.065f, 0.085f },
+        { 0.058f, 0.062f, 0.100f },
+        { 0.078f, 0.083f, 0.090f },
+        { 0.048f, 0.052f, 0.075f },
     };
 
     for (i = 0; i < 3; i++) {

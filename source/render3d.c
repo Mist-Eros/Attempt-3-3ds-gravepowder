@@ -120,9 +120,9 @@
 
 /* imported-model runtime (GPM v1) */
 #define R3D_HERO_HEIGHT        1.88f  /* hat-top height in metres (Lead: 1.85-1.90) */
-#define R3D_HERO_HEAD_TOP      0.335f /* procedural hat top above the Head bone */
-#define R3D_NEAR_ZOMBIES       3      /* fully skinned zombies                */
-#define R3D_SKIN_BUDGET        20000  /* max skinned verts/frame total        */
+#define R3D_HERO_HEAD_TOP      0.417f /* procedural hat top above the Head bone */
+#define R3D_NEAR_ZOMBIES       4      /* fully skinned zombies                */
+#define R3D_SKIN_BUDGET        28000  /* max skinned verts/frame total (tuned) */
 #define R3D_ZOMBIE_LOD_DIST    14.0f  /* further zombies reuse a shared pose  */
 #define R3D_MODEL_DIR          "sdmc:/3ds/Gravepowder/models/"
 #define R3D_MAX_MODEL_VERTS    12000  /* dynamic VBO capacity per instance    */
@@ -1065,7 +1065,8 @@ static void dust_build(const Vec3 *right, const Vec3 *up)
 }
 static void effects_build(const GraveGame *game, const Vec3 *cam_pos,
                           const Vec3 *fwd, const Vec3 *right, const Vec3 *up,
-                          Vec3 muzzle, bool muzzle_visible, float muzzle_flash)
+                          Vec3 muzzle, bool muzzle_visible, float muzzle_flash,
+                          float fx_scale)
 {
     int i;
 
@@ -1119,7 +1120,7 @@ static void effects_build(const GraveGame *game, const Vec3 *cam_pos,
         if (!p->active)
             continue;
         k = p->age / p->life;
-        size = p->size + 0.20f * k;
+        size = (p->size + 0.20f * k) * fx_scale;
         fade = (1.0f - k) * (1.0f - k) * 0.30f;
         dyn_quad(p->pos, *right, *up, size, size,
                  fade * 0.85f, fade * 0.82f, fade * 0.75f);
@@ -1131,7 +1132,7 @@ static void effects_build(const GraveGame *game, const Vec3 *cam_pos,
     /* muzzle flash: two crossed quads at the muzzle */
     if (muzzle_visible && muzzle_flash > 0.001f) {
         float f = clampf(muzzle_flash, 0.0f, 1.0f);
-        float s1 = 0.055f + 0.13f * f;
+        float s1 = (0.055f + 0.13f * f) * fx_scale;
         Vec3 r2 = v3_norm(v3_add(v3_scale(*right, 0.7071f), v3_scale(*up, 0.7071f)));
         Vec3 u2 = v3_norm(v3_sub(v3_scale(*up, 0.7071f), v3_scale(*right, 0.7071f)));
 
@@ -1209,9 +1210,16 @@ static void r3d_asset_log(const char *fmt, ...)
     fclose(f);
 }
 
+/* Converts a row-major float[16] (x,y,z,w per row) into a C3D_Mtx.  C3D_FVec
+ * uses the PICA layout (w,z,y,x per row), so a plain memcpy would scramble the
+ * matrix - every column/translation would land in the wrong place. */
 static void mtx_from_floats(C3D_Mtx *out, const float *f)
 {
-    memcpy(out->m, f, 16u * sizeof(float));
+    int r;
+    for (r = 0; r < 4; r++) {
+        out->r[r] = FVec4_New(f[r * 4 + 0], f[r * 4 + 1],
+                              f[r * 4 + 2], f[r * 4 + 3]);
+    }
 }
 
 static Vec3 mtx_translation(const float *f)
@@ -1632,6 +1640,9 @@ static void r3d_build_wolf_attachments(MeshVertex *scratch, int scratch_cap)
         return;
     mesh_build_wolf_head(&s_wolf_head, &s_arena, scratch, scratch_cap);
     mesh_build_wolf_tail(s_wolf_tail, &s_arena, scratch, scratch_cap);
+    r3d_asset_log("attach: head=%u verts tail=%u/%u/%u verts",
+                  s_wolf_head.vertex_count, s_wolf_tail[0].vertex_count,
+                  s_wolf_tail[1].vertex_count, s_wolf_tail[2].vertex_count);
 }
 
 /* Decides the hero clip from core state and advances the clocks. */
@@ -1692,10 +1703,10 @@ static void hero_gpm_draw_attachments(const C3D_Mtx *root_view, const C3D_Mtx *r
 
     /* --- head (wolf identity) ------------------------------------- */
     if (s_wolf_head.vbo != NULL && s_hero_bone_head >= 0) {
-        mtx_from_floats(&pose, s_hero_skin.pose[s_hero_bone_head * 16]);
+        mtx_from_floats(&pose, &s_hero_skin.pose[s_hero_bone_head][0]);
         attach_local(&local, s_hero_head_rest,
-                     v3(0.0f, 0.105f, 0.020f), v3(0, 0, 0),
-                     attach_scale);
+                     v3(0.0f, 0.100f, 0.020f), v3(0, 0, 0),
+                     attach_scale * 1.08f);
         Mtx_Multiply(&attach, &pose, &local);
         Mtx_Multiply(&mv, root_view, &attach);
         draw_mesh_mv(&mv, &s_wolf_head, 1.0f, 1.0f, 1.0f, 0.0f);
@@ -1707,10 +1718,11 @@ static void hero_gpm_draw_attachments(const C3D_Mtx *root_view, const C3D_Mtx *r
         float sway = sinf(s_title_clock * 2.0f + (float)(s_hero_skin.model ? s_hero_skin.model->anim_count : 0)) * 0.15f;
         float sway2 = sinf(s_title_clock * 1.7f + 1.3f) * 0.22f;
 
-        mtx_from_floats(&pose, s_hero_skin.pose[s_hero_bone_hips * 16]);
-        /* base: hips rest position, slightly behind/down */
+        mtx_from_floats(&pose, &s_hero_skin.pose[s_hero_bone_hips][0]);
+        /* base: behind/down from the hips at ~52 degrees, clear of the coat */
         attach_local(&chain, s_hero_hips_rest,
-                     v3(0.0f, -0.02f, -0.10f), v3(-6.0f, sway * 57.0f, 0.0f),
+                     v3(0.0f, -0.02f, -0.10f),
+                     v3(-52.0f, sway * 40.0f, 0.0f),
                      attach_scale);
         Mtx_Multiply(&attach, &pose, &chain);
         Mtx_Multiply(&mv, root_view, &attach);
@@ -1718,10 +1730,11 @@ static void hero_gpm_draw_attachments(const C3D_Mtx *root_view, const C3D_Mtx *r
 
         for (i = 1; i < 3; i++) {
             C3D_Mtx step;
-            float len = (i == 1) ? 0.17f : 0.15f;
+            float len = (i == 1) ? 0.20f : 0.18f;
             float s = (i == 1) ? sway2 : -sway2 * 0.6f;
+            float kink = (i == 1) ? 9.0f : -11.0f;
             attach_local(&step, v3(0.0f, 0.0f, -len), v3(0, 0, 0),
-                         v3(s * 40.0f, 0.0f, 0.0f), 1.0f);
+                         v3(-9.0f + s * 26.0f, s * 12.0f, kink), 1.0f);
             {
                 C3D_Mtx tmp;
                 Mtx_Multiply(&tmp, &attach, &step);
@@ -1782,17 +1795,17 @@ static void hero_draw_gpm(const Player *player, const C3D_Mtx *view,
     if (s_gpm_gun_ok[weapon] && s_gpm_gun_mesh[weapon].vbo != NULL) {
         if (s_hero_bone_wrist >= 0) {
             static const Vec3 tp_pos[WEAPON_COUNT] = {
-                { 0.0f, -0.02f, 0.060f },   /* flintlock */
-                { 0.0f, -0.02f, 0.055f },   /* revolver  */
-                { 0.0f, -0.03f, 0.220f },   /* musket    */
+                { 0.0f, -0.010f, 0.080f },  /* flintlock */
+                { 0.0f, -0.010f, 0.070f },  /* revolver  */
+                { 0.0f, -0.020f, 0.280f },  /* musket    */
             };
             static const Vec3 tp_rot[WEAPON_COUNT] = {
-                { 0.0f, 0.0f, 0.0f },
-                { 0.0f, 0.0f, 0.0f },
-                { 0.0f, 0.0f, 0.0f },
+                { -28.0f, 0.0f, 0.0f },     /* carried low, barrel down-forward */
+                { -28.0f, 0.0f, 0.0f },
+                { -14.0f, 0.0f, 0.0f },
             };
             float gs = s_gpm_gun_scale[weapon];
-            mtx_from_floats(&pose, s_hero_skin.pose[s_hero_bone_wrist * 16]);
+            mtx_from_floats(&pose, &s_hero_skin.pose[s_hero_bone_wrist][0]);
             attach_local(&local, s_hero_wrist_rest,
                          v3(tp_pos[weapon].x, tp_pos[weapon].y, tp_pos[weapon].z),
                          tp_rot[weapon], gs);
@@ -1804,8 +1817,8 @@ static void hero_draw_gpm(const Player *player, const C3D_Mtx *view,
             if (muzzle != NULL) {
                 Vec3 ml = s_gpm_gun_muzzle_local[weapon];
                 C3D_FVec mp = Mtx_MultiplyFVecH(&attach,
-                                                FVec3_New(ml.x, ml.y, ml.z));
-                mp = Mtx_MultiplyFVecH(&root, FVec3_New(mp.x, mp.y, mp.z));
+                                                FVec4_New(ml.x, ml.y, ml.z, 1.0f));
+                mp = Mtx_MultiplyFVecH(&root, FVec4_New(mp.x, mp.y, mp.z, 1.0f));
                 *muzzle = v3(mp.x, mp.y, mp.z);
             }
         } else {
@@ -1817,7 +1830,7 @@ static void hero_draw_gpm(const Player *player, const C3D_Mtx *view,
             draw_mesh_mv(&mv, &s_gpm_gun_mesh[weapon], 1.0f, 1.0f, 1.0f, 0.10f);
             C3D_CullFace(GPU_CULL_BACK_CCW);
             if (muzzle != NULL) {
-                C3D_FVec mp = Mtx_MultiplyFVecH(&mv, FVec3_New(0.0f, 0.02f, 0.3f));
+                C3D_FVec mp = Mtx_MultiplyFVecH(&mv, FVec4_New(0.0f, 0.02f, 0.3f, 1.0f));
                 *muzzle = v3(mp.x, mp.y, mp.z);
             }
         }
@@ -1831,12 +1844,9 @@ static void hero_draw_gpm(const Player *player, const C3D_Mtx *view,
         draw_mesh_mv(&mv, &s_weapons[weapon], 1.0f, 1.0f, 1.0f, 0.10f);
         {
             C3D_FVec mp = Mtx_MultiplyFVecH(&gun_world,
-                                            FVec3_New(0.0f, 0.028f, s_muzzle_z[weapon]));
+                                            FVec4_New(0.0f, 0.028f, s_muzzle_z[weapon], 1.0f));
             *muzzle = v3(mp.x, mp.y, mp.z);
         }
-    }
-    if (muzzle == NULL && s_gpm_gun_ok[weapon] && s_gpm_gun_mesh[weapon].vbo != NULL) {
-        /* draw-only path (title screen): nothing extra */
     }
 }
 
@@ -2122,16 +2132,16 @@ static void zombie_gpm_draw_one(const Zombie *z, const C3D_Mtx *view, float cloc
 /* ------------------------------------------------------------------ */
 
 /* Per-weapon first-person placement, tuned for the imported static GPMs. */
+/* First-person viewmodel tuning (camera space, metres, degrees):
+ * pos = local offset, scale = viewmodel scale, pitch/yaw = camera-space aim. */
 static const Vec3 s_gpm_fp_pos[WEAPON_COUNT] = {
-    { 0.150f, -0.120f, -0.300f },
-    { 0.150f, -0.115f, -0.290f },
-    { 0.165f, -0.135f, -0.880f },
+    { 0.085f, -0.090f, -0.420f },   /* flintlock */
+    { 0.085f, -0.086f, -0.400f },   /* revolver  */
+    { 0.110f, -0.105f, -0.950f },   /* musket    */
 };
-static const Vec3 s_gpm_fp_rot[WEAPON_COUNT] = {
-    { 0.0f, 180.0f, 0.0f },
-    { 0.0f, 180.0f, 0.0f },
-    { 0.0f, 180.0f, 0.0f },
-};
+static const float s_gpm_fp_scale[WEAPON_COUNT] = { 0.42f, 0.46f, 0.45f };
+static const float s_gpm_fp_pitch[WEAPON_COUNT] = { 5.0f, 5.0f, 3.0f };
+static const float s_gpm_fp_yaw[WEAPON_COUNT] = { 14.0f, 14.0f, 8.0f };
 
 static void draw_first_person_gun_gpm(const GraveGame *game, WeaponId weapon,
                                       Vec3 *muzzle_out)
@@ -2150,18 +2160,22 @@ static void draw_first_person_gun_gpm(const GraveGame *game, WeaponId weapon,
                   s_gpm_fp_pos[weapon].x + sway_x,
                   s_gpm_fp_pos[weapon].y + sway_y,
                   s_gpm_fp_pos[weapon].z + recoil * 0.5f + kick * 0.02f, true);
-    Mtx_RotateY(&model, deg2rad(s_gpm_fp_rot[weapon].y), true);
-    Mtx_RotateX(&model, deg2rad(s_gpm_fp_rot[weapon].x) + recoil * 1.6f + kick * 0.1f, true);
-    Mtx_RotateZ(&model, deg2rad(s_gpm_fp_rot[weapon].z) + sway_x * 0.6f, true);
-    Mtx_Scale(&model, s_gpm_gun_scale[weapon], s_gpm_gun_scale[weapon],
-              s_gpm_gun_scale[weapon]);
+    /* camera-space aim first, then yaw the (muzzle +Z) model away from the
+     * camera: T * Rx * Ry(180 + yaw) * Rz * S */
+    Mtx_RotateX(&model, deg2rad(s_gpm_fp_pitch[weapon]) + recoil * 1.6f +
+                         kick * 0.1f, true);
+    Mtx_RotateY(&model, deg2rad(180.0f + s_gpm_fp_yaw[weapon]), true);
+    Mtx_RotateZ(&model, sway_x * 0.6f, true);
+    Mtx_Scale(&model, s_gpm_gun_scale[weapon] * s_gpm_fp_scale[weapon],
+              s_gpm_gun_scale[weapon] * s_gpm_fp_scale[weapon],
+              s_gpm_gun_scale[weapon] * s_gpm_fp_scale[weapon]);
     C3D_CullFace(GPU_CULL_NONE);
     draw_mesh_mv(&model, &s_gpm_gun_mesh[weapon], 1.0f, 1.0f, 1.0f, 0.18f);
     C3D_CullFace(GPU_CULL_BACK_CCW);
 
     if (muzzle_out != NULL) {
         Vec3 ml = s_gpm_gun_muzzle_local[weapon];
-        C3D_FVec mp = Mtx_MultiplyFVecH(&model, FVec3_New(ml.x, ml.y, ml.z));
+        C3D_FVec mp = Mtx_MultiplyFVecH(&model, FVec4_New(ml.x, ml.y, ml.z, 1.0f));
         *muzzle_out = v3(mp.x, mp.y, mp.z);  /* camera space for FP */
     }
 }
@@ -2275,7 +2289,7 @@ static void draw_world_geometry(const GraveGame *game, const C3D_Mtx *view,
         float flash = clampf(game->player.muzzle_flash / R3D_MUZZLE_FLASH_TIME,
                              0.0f, 1.0f);
         effects_build(game, cam_pos, fwd, right, up, muzzle,
-                      flash > 0.0f, flash);
+                      flash > 0.0f, flash, first_person ? 0.30f : 1.0f);
     }
     begin_additive();
     dyn_flush(view, 1.0f, 1.0f, 1.0f, 1.0f);
@@ -2515,15 +2529,20 @@ void r3d_init(void)
     AttrInfo_AddLoader(&s_attr, 1, GPU_FLOAT, 3);  /* normal   */
     AttrInfo_AddLoader(&s_attr, 2, GPU_FLOAT, 3);  /* albedo   */
 
-    /* meshes: one arena for all static geometry, one transient scratch */
-    s_arena_mem = linearAlloc(R3D_MESH_ARENA_BYTES);
-    if (s_arena_mem == NULL) {
-        return;
-    }
-    mesh_arena_init(&s_arena, s_arena_mem, R3D_MESH_ARENA_BYTES);
-
-    /* Imported models decide which procedural fallbacks are needed. */
+    /* Imported models decide which procedural fallbacks (and how much arena)
+     * are needed.  Loading them first lets the GPM path reserve a smaller mesh
+     * arena, because the 33 baked zombie pose meshes are then unnecessary. */
     r3d_assets_init();
+
+    /* meshes: one arena for all static geometry, one transient scratch */
+    {
+        unsigned arena_bytes = s_gpm_zombie_ok ? (1536u * 1024u)
+                                              : R3D_MESH_ARENA_BYTES;
+        s_arena_mem = linearAlloc(arena_bytes);
+        if (s_arena_mem == NULL)
+            return;
+        mesh_arena_init(&s_arena, s_arena_mem, arena_bytes);
+    }
 
     scratch = (MeshVertex *)linearAlloc((size_t)R3D_SCRATCH_VERTS * sizeof(MeshVertex));
     if (scratch == NULL)

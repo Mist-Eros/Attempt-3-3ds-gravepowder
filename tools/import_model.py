@@ -45,13 +45,15 @@ GLTF import details:
   * rigid skinning: strongest WEIGHTS_0 influence wins; vertices are transformed
     with world(dominant joint) * inverseBind(dominant joint) into rest pose;
   * vertex colours = baseColorTexture sampled at TEXCOORD_0 (nearest, sRGB) *
-    baseColorFactor (linear->sRGB), or factor alone; COLOR_0 is multiplied in
-    when present (it is all-white on the shipped zombie); a config
-    "colour_overrides" entry (keyed by mesh-node or material name) replaces the
-    colour for that part;
-  * animations are resampled at config "resample_hz" (default 30) and thinned:
-    interior keys that a linear/slerp segment reproduces within a small epsilon
-    are dropped;
+    baseColorFactor (already linear in glTF) * COLOR_0 (when present), encoded
+    back to sRGB 8-bit; a config "colour_overrides" entry (keyed by mesh-node or
+    material name) replaces the colour for that part, while "colour_multiply"
+    entries are display-space gains composed together (part x material x "*")
+    that brighten/tint the baked result while keeping texture/material detail;
+  * animations are resampled at config "resample_hz" (default 30) and thinned
+    with a proper Ramer-Douglas-Peucker pass: dropped keys are guaranteed to be
+    within the rotation/translation tolerance of the runtime's linear/slerp
+    interpolation, so swings that go out and back are never flattened;
   * model scaling: "kind" picks a canonical target (hero 1.80 m tall, zombie
     1.70 m tall, weapon 1.00 m long); config "scale" multiplies that; optional
     config "target_height"/"target_length" overrides the canonical target.
@@ -668,6 +670,23 @@ class Importer:
                           "[r,g,b,a]; ignoring")
                 continue
             self.overrides[key] = np.clip(rgba, 0.0, 1.0)
+        # colour_multiply: like colour_overrides, but multiplies the baked
+        # colour (so texture detail survives) instead of replacing it. Values
+        # are display-space gains and may be > 1 to brighten dark materials.
+        self.multiplies = {}
+        for key, value in (config.get("colour_multiply") or {}).items():
+            rgb = np.asarray(value, dtype=np.float64)
+            if rgb.shape[0] == 3:
+                rgb = np.concatenate([rgb, [1.0]])
+            if rgb.shape[0] != 4:
+                self.warn(f"colour_multiply[{key!r}] must be [r,g,b] or "
+                          "[r,g,b,a]; ignoring")
+                continue
+            if np.any(rgb < 0.0):
+                self.warn(f"colour_multiply[{key!r}] has negative components; "
+                          "clamping to 0")
+                rgb = np.maximum(rgb, 0.0)
+            self.multiplies[key] = rgb
         self.texture_filter = str(
             config.get("texture_filter", "nearest")).upper()
         if self.texture_filter not in ("NEAREST", "LINEAR"):
@@ -903,11 +922,14 @@ class Importer:
                     prim.material)
                 material_name = self.src.material_name(prim.material)
                 override = self._override_colour(mesh_name, material_name)
+                multiply = self._multiply_colour(mesh_name, material_name)
                 if override is not None:
                     display = np.broadcast_to(override, (count, 4)).copy()
                 else:
+                    # glTF baseColorFactor is already linear; textures and
+                    # COLOR_0 are sRGB/linear as noted in the format spec.
                     linear = np.broadcast_to(
-                        srgb_to_linear(factor[:3]), (count, 3)).copy()
+                        np.clip(factor[:3], 0.0, 1.0), (count, 3)).copy()
                     if texture is not None:
                         tex_index, image_index = texture
                         if uvs is None:
@@ -923,9 +945,14 @@ class Importer:
                     display = np.empty((count, 4))
                     display[:, :3] = linear_to_srgb(linear)
                     display[:, 3] = factor[3]
-                if colours is not None and override is None:
-                    display[:, 3] *= np.clip(colours[:, 3], 0.0, 1.0)
-                display[:, 3] = np.clip(display[:, 3], 0.0, 1.0)
+                    if multiply is not None:
+                        # display-space gain: keeps texture/material detail but
+                        # lifts the overall brightness/temperature
+                        display[:, :3] *= multiply[:3]
+                        display[:, 3] *= multiply[3]
+                    if colours is not None:
+                        display[:, 3] *= np.clip(colours[:, 3], 0.0, 1.0)
+                display = np.clip(display, 0.0, 1.0)
                 colour_u8 = np.rint(display * 255.0).astype(np.uint8)
 
                 parts.append({
@@ -952,6 +979,22 @@ class Importer:
         if "*" in self.overrides:
             return self.overrides["*"]
         return None
+
+    def _multiply_colour(self, mesh_name, material_name):
+        """Compose every matching colour_multiply entry (part, material, '*')."""
+        keys = []
+        if mesh_name:
+            keys.append(mesh_name)
+        if material_name and material_name != mesh_name:
+            keys.append(material_name)
+        keys.append("*")
+        result = None
+        for key in keys:
+            factor = self.multiplies.get(key)
+            if factor is None:
+                continue
+            result = factor.copy() if result is None else result * factor
+        return result
 
     # -- model transform ----------------------------------------------
     def compute_model_matrix(self, parts):
@@ -1216,30 +1259,55 @@ def _normalise_sample(value, path):
 
 
 def thin_keys(keys, component):
-    """Drop interior keys that a linear/slerp segment reproduces within eps."""
+    """Ramer-Douglas-Peucker thinning for one animation track.
+
+    Keeps the first/last key and recursively keeps the key that deviates most
+    from the chord between the current span's endpoints, as long as that
+    deviation is above the tolerance. This guarantees that every dropped key is
+    within eps of the runtime's linear/slerp interpolation between the keys that
+    actually remain, so e.g. a swing that goes out and comes back is never
+    flattened into one straight segment.
+    """
     if len(keys) <= 2:
         return keys
-    out = [keys[0]]
-    for index in range(1, len(keys) - 1):
-        prev = out[-1]
-        nxt = keys[index + 1]
-        span = nxt.time - prev.time
-        alpha = 0.0 if span <= 1e-9 else (keys[index].time - prev.time) / span
+    keep = [False] * len(keys)
+    keep[0] = True
+    keep[-1] = True
+
+    def deviation(start, end, middle):
+        span = keys[end].time - keys[start].time
+        alpha = 0.0 if span <= 1e-9 else (keys[middle].time -
+                                          keys[start].time) / span
         if component == COMPONENT_ROTATION:
-            predicted = quat_slerp(prev.value, nxt.value, alpha)
-            error = quat_angle_between(predicted, keys[index].value)
-            keep = error > THIN_ROTATION_EPS
-        elif component == COMPONENT_TRANSLATION:
-            predicted = prev.value + (nxt.value - prev.value) * alpha
-            keep = np.linalg.norm(predicted - keys[index].value) > \
-                THIN_TRANSLATION_EPS
-        else:
-            predicted = prev.value + (nxt.value - prev.value) * alpha
-            keep = np.linalg.norm(predicted - keys[index].value) > THIN_SCALE_EPS
-        if keep:
-            out.append(keys[index])
-    out.append(keys[-1])
-    return out
+            predicted = quat_slerp(keys[start].value, keys[end].value, alpha)
+            return quat_angle_between(predicted, keys[middle].value)
+        predicted = keys[start].value + (keys[end].value -
+                                         keys[start].value) * alpha
+        return float(np.linalg.norm(predicted - keys[middle].value))
+
+    tolerance = {
+        COMPONENT_ROTATION: THIN_ROTATION_EPS,
+        COMPONENT_TRANSLATION: THIN_TRANSLATION_EPS,
+        COMPONENT_SCALE: THIN_SCALE_EPS,
+    }[component]
+
+    stack = [(0, len(keys) - 1)]
+    while stack:
+        start, end = stack.pop()
+        if end <= start + 1:
+            continue
+        worst_index = -1
+        worst_deviation = tolerance
+        for index in range(start + 1, end):
+            dev = deviation(start, end, index)
+            if dev > worst_deviation:
+                worst_deviation = dev
+                worst_index = index
+        if worst_index >= 0:
+            keep[worst_index] = True
+            stack.append((start, worst_index))
+            stack.append((worst_index, end))
+    return [key for key, kept in zip(keys, keep) if kept]
 
 
 # ---------------------------------------------------------------------------
@@ -1878,7 +1946,7 @@ def _sample_pose_track(track, time_seconds):
 
 
 def render_preview(gpm, out_path, clip_name=None, time_seconds=0.0,
-                   width=900, height=700, wireframe=True,
+                   width=900, height=700, wireframe=False,
                    view_yaw=PREVIEW_YAW, view_pitch=PREVIEW_PITCH,
                    label_suffix=""):
     """Orthographic 3/4-view flat-shaded render of the model (Pillow)."""
@@ -2146,6 +2214,8 @@ def main(argv=None):
                              "model's +Z side)")
     parser.add_argument("--preview-pitch", type=float, default=PREVIEW_PITCH,
                         help="preview camera pitch in degrees")
+    parser.add_argument("--preview-wireframe", action="store_true",
+                        help="overlay triangle wireframe on the preview")
     parser.add_argument("--stats", action="store_true",
                         help="print a detailed stats table")
     parser.add_argument("--bones", action="store_true",
@@ -2255,6 +2325,7 @@ def main(argv=None):
                 clip_name = gpm.clips[0].name
         render_preview(gpm, args.preview, clip_name=clip_name,
                        time_seconds=args.preview_time,
+                       wireframe=args.preview_wireframe,
                        view_yaw=args.preview_yaw,
                        view_pitch=args.preview_pitch)
         if not args.quiet:

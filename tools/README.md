@@ -121,6 +121,7 @@ python tools\import_model.py assets\models\hero_medieval.glb ^
 | `--preview-clip ROLE` / `--preview-time SEC` | pose the preview with a clip (default: rest pose) |
 | `--preview-rest` | keep the rest pose even though the model has clips |
 | `--preview-yaw/--preview-pitch DEG` | preview camera angle (`--preview-yaw 0` = look at the model's +Z side, `90` = side view with +Z to the right) |
+| `--preview-wireframe` | overlay triangle wireframe on the preview (off by default) |
 | `--stats`, `--bones` | print the full stats block / bone table |
 | `--thin-rotation-deg`, `--thin-translation-m`, `--no-thin` | animation keyframe thinning tolerances |
 | `--quiet` | only print errors (used by the batch converter) |
@@ -131,14 +132,34 @@ What the importer does, in short (details in the module docstring and
 - reads GLB via `pygltflib`, merges all skins by joint name, rebuilds one
   parent-before-child bone table with local rest TRS, and rigid-dominates each
   vertex onto its strongest joint;
-- bakes base-colour textures (sampled with Pillow), `baseColorFactor` and
+- bakes base-colour textures (sampled with Pillow), linear `baseColorFactor` and
   `COLOR_0` into 8-bit vertex colours, with per-mesh/material
-  `colour_overrides`;
+  `colour_overrides` (replace) and `colour_multiply` (composed display-space
+  gains; keeps texture/material detail);
 - resamples the configured animations at `resample_hz` (30 Hz for characters),
-  converts quaternions to shortest-arc unit quats and thins redundant keys;
+  converts quaternions to shortest-arc unit quats and thins redundant keys with
+  a Ramer-Douglas-Peucker pass (bounded interpolation error, no flattened
+  swings);
 - normalises each model to metres (`hero` 1.80 m tall, `zombie` 1.70 m, weapon
   longest dimension 1.00 m; config `scale` multiplies that) and validates the
   written file by reading it back.
+
+### Import config keys
+
+| key | meaning |
+|---|---|
+| `kind` | `hero`, `zombie` or `weapon`; picks the metre-scale target |
+| `source` | path to the `.glb` (the CLI positional overrides it) |
+| `scale`, `yaw`, `offset` | extra uniform scale / Y rotation (degrees) / translation after normalisation |
+| `parts` | mesh-node names to export; other meshes are dropped (bones are kept) |
+| `attachments` | role -> bone-name hints (`head`, `tail`, `gun`, ...); validated and reported, never stored in the GPM |
+| `animations` | role (`idle`/`walk`/`run`/`shoot`/`reload`/`attack`/`hit`/`death`) -> source clip name |
+| `resample_hz` | animation sampling rate (30 for characters, 0 for static props) |
+| `texture_filter` | `nearest` (default, right for palette textures) or `linear` |
+| `colour_overrides` | mesh-node or material name -> `[r,g,b(,a)]` display colour that **replaces** the baked colour |
+| `colour_multiply` | mesh-node or material name -> `[r,g,b(,a)]` **display-space gain** applied on top of the baked colour; part, material and `"*"` entries compose (multiply), values > 1 brighten. The hero uses this to lift its very dark source materials into dust-lit leather while keeping detail |
+| `target_height` / `target_length` | override the canonical metre target for the kind |
+| `credit` | attribution string written into the GPM header |
 
 **Coordinate convention (the runtime must match):** GPM space is right-handed,
 **+Y up, +Z forward**, metres. Characters are grounded at y=0 and centred on

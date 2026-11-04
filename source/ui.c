@@ -64,9 +64,9 @@ static const u32 COL_MAP_GRID  = CLR(0x3A, 0x2F, 0x20, 0xFF);
 #define CONTENT_BOT 236.0f
 
 /* AREA page: a square top-down map of the Ashen Mill yard. */
-#define AREA_MAP_X    93.0f
-#define AREA_MAP_Y    66.0f
-#define AREA_MAP_SIZE 122.0f
+#define AREA_MAP_X    104.0f
+#define AREA_MAP_Y    64.0f
+#define AREA_MAP_SIZE 112.0f
 #define AREA_WORLD_MIN (-21.0f)
 #define AREA_WORLD_MAX 21.0f
 
@@ -283,15 +283,15 @@ UiRect ui_area_map_rect(void)
 UiRect ui_world_node_rect(int node)
 {
     if (node == 1) {
-        UiRect b = { 178.0f, 78.0f, 118.0f, 44.0f };
+        UiRect b = { 178.0f, 78.0f, 118.0f, 42.0f };
         return b;
     }
     if (node == 2) {
-        UiRect o = { 178.0f, 146.0f, 118.0f, 44.0f };
+        UiRect o = { 178.0f, 134.0f, 118.0f, 42.0f };
         return o;
     }
     {
-        UiRect m = { 40.0f, 116.0f, 118.0f, 44.0f };
+        UiRect m = { 40.0f, 100.0f, 118.0f, 42.0f };
         return m;
     }
 }
@@ -305,15 +305,15 @@ UiRect ui_pack_weapon_rect(int index)
     if (index >= WEAPON_COUNT)
         index = WEAPON_COUNT - 1;
     r.x = 6.0f;
-    r.y = 64.0f + (float)index * 54.0f;
+    r.y = 62.0f + (float)index * 46.0f;
     r.w = 170.0f;
-    r.h = 50.0f;
+    r.h = 42.0f;
     return r;
 }
 
 UiRect ui_title_start_rect(void)
 {
-    UiRect r = { 62.0f, 184.0f, 196.0f, 32.0f };
+    UiRect r = { 62.0f, 166.0f, 196.0f, 30.0f };
     return r;
 }
 
@@ -436,14 +436,15 @@ static void draw_strip(const App *app)
     fill_rect(0.0f, STRIP_H - 1.0f, 320.0f, 2.0f, COL_BRASS);
 
     /* health + stamina */
-    draw_heart(13.0f, 11.0f, 4.6f, COL_BLOOD_HI);
-    bar(22.0f, 5.0f, 104.0f, 13.0f, hp_frac, COL_BLOOD_HI,
-        CLR(0x4A, 0x2A, 0x1E, 0xFF));
+    draw_heart(14.0f, 11.5f, 5.2f, COL_BLOOD_HI);
+    bar(23.0f, 4.0f, 103.0f, 14.0f, hp_frac, COL_BLOOD_HI,
+        CLR(0x3A, 0x20, 0x16, 0xFF));
     snprintf(buf, sizeof(buf), "%d / %d", (int)(p->hp + 0.5f),
              (int)(p->max_hp + 0.5f));
-    text_center(app, 74.0f, 6.0f, 0.42f, COL_BONE, buf);
-    bar(22.0f, 21.0f, 104.0f, 5.0f, stam_frac, COL_STAM,
-        CLR(0x3C, 0x33, 0x20, 0xFF));
+    text_center(app, 74.5f, 5.5f, 0.42f, COL_INK, buf);
+    text_center(app, 74.0f, 5.0f, 0.42f, COL_BONE, buf);
+    bar(23.0f, 20.0f, 103.0f, 7.0f, stam_frac, CLR(0xBC, 0xC6, 0x7A, 0xFF),
+        CLR(0x2A, 0x25, 0x16, 0xFF));
 
     /* weapon + ammo */
     if (spec != NULL) {
@@ -695,7 +696,7 @@ static void draw_area_page(const App *app)
     const GraveGame *g = &app->game;
     char buf[64];
     float frac = 0.0f;
-    UiRect qs = { 6.0f, 196.0f, 308.0f, 22.0f };
+    UiRect qs = { 6.0f, 180.0f, 308.0f, 18.0f };
     int secs = (int)g->zone_time;
     int rounds = 0;
     int i;
@@ -705,39 +706,37 @@ static void draw_area_page(const App *app)
         return;
     }
 
-    paper_panel(6.0f, CONTENT_Y, 308.0f, 130.0f);
+    paper_panel(6.0f, CONTENT_Y, 308.0f, 116.0f);
     text_left(app, 14.0f, CONTENT_Y + 3.0f, 0.34f, COL_INK_SOFT,
               grave_zone_name(g->zone));
     text_right(app, 306.0f, CONTENT_Y + 3.0f, 0.34f, COL_INK_SOFT, "AREA MAP");
 
-    /* left column: quick zone facts */
+    /* left column: quick zone facts (three short rows, no wrapping) */
     text_left(app, 14.0f, 82.0f, 0.3f, COL_INK_SOFT, "TIME");
     snprintf(buf, sizeof(buf), "%d:%02d", secs / 60, secs % 60);
-    text_left(app, 14.0f, 92.0f, 0.42f, COL_INK, buf);
-    text_left(app, 14.0f, 110.0f, 0.3f, COL_INK_SOFT, "ROT DOWN");
+    text_left(app, 14.0f, 92.0f, 0.4f, COL_INK, buf);
+    text_left(app, 14.0f, 108.0f, 0.3f, COL_INK_SOFT, "ROT DOWN");
     snprintf(buf, sizeof(buf), "%d", g->zombies_killed);
-    text_left(app, 14.0f, 120.0f, 0.42f, COL_INK, buf);
-    text_left(app, 14.0f, 138.0f, 0.3f, COL_INK_SOFT, "ROUNDS");
+    text_left(app, 14.0f, 118.0f, 0.4f, COL_INK, buf);
+    text_left(app, 14.0f, 134.0f, 0.3f, COL_INK_SOFT, "ROUNDS");
     for (i = 0; i < WEAPON_COUNT; i++)
         rounds += g->player.ammo[i];
     snprintf(buf, sizeof(buf), "%d", rounds);
-    text_left(app, 14.0f, 148.0f, 0.42f, COL_INK, buf);
-    text_left(app, 14.0f, 166.0f, 0.3f, COL_INK_SOFT, "SURVIVE");
-    text_left(app, 14.0f, 176.0f, 0.3f, COL_BLOOD, "THE YARD");
+    text_left(app, 14.0f, 144.0f, 0.4f, COL_INK, buf);
 
     draw_area_map(app);
 
-    /* right column: map legend + objective */
-    circle(232.0f, 88.0f, 3.0f, COL_BRASS_HI);
-    text_left(app, 240.0f, 82.0f, 0.32f, COL_INK_SOFT, "YOU");
-    circle(232.0f, 104.0f, 3.0f, COL_ROT);
-    text_left(app, 240.0f, 98.0f, 0.32f, COL_INK_SOFT, "ROT");
-    circle(232.0f, 120.0f, 3.0f, COL_HILITE);
-    text_left(app, 240.0f, 114.0f, 0.32f, COL_INK_SOFT, "LOOT");
-    tri(229.0f, 142.0f, 235.0f, 142.0f, 232.0f, 134.0f, COL_BRASS_HI);
-    text_left(app, 240.0f, 130.0f, 0.32f, COL_INK_SOFT, "GATE");
-    text_left(app, 226.0f, 156.0f, 0.3f, COL_INK_SOFT, "OBJECTIVE");
-    text_left(app, 226.0f, 168.0f, 0.3f, COL_BLOOD, "CLEAR THE YARD");
+    /* right column: map legend + objective (single short line) */
+    circle(232.0f, 84.0f, 3.0f, COL_BRASS_HI);
+    text_left(app, 240.0f, 78.0f, 0.3f, COL_INK_SOFT, "YOU");
+    circle(232.0f, 98.0f, 3.0f, COL_ROT);
+    text_left(app, 240.0f, 92.0f, 0.3f, COL_INK_SOFT, "ROT");
+    circle(232.0f, 112.0f, 3.0f, COL_HILITE);
+    text_left(app, 240.0f, 106.0f, 0.3f, COL_INK_SOFT, "LOOT");
+    tri(229.0f, 134.0f, 235.0f, 134.0f, 232.0f, 126.0f, COL_BRASS_HI);
+    text_left(app, 240.0f, 122.0f, 0.3f, COL_INK_SOFT, "GATE");
+    text_left(app, 226.0f, 138.0f, 0.3f, COL_INK_SOFT, "OBJECTIVE");
+    text_left(app, 226.0f, 150.0f, 0.32f, COL_BLOOD, "CLEAR THE ROT");
 
     /* quest progress strip */
     paper_panel(qs.x, qs.y, qs.w, qs.h);
@@ -746,22 +745,22 @@ static void draw_area_page(const App *app)
     if (g->quest.kind == QUEST_COLLECT) {
         snprintf(buf, sizeof(buf), "COLLECT %s",
                  grave_drop_name((GraveDrop)g->quest.material));
-        text_left(app, qs.x + 6.0f, qs.y + 6.0f, 0.36f, COL_INK, buf);
+        text_left(app, qs.x + 6.0f, qs.y + 4.0f, 0.32f, COL_INK, buf);
     } else {
-        text_left(app, qs.x + 6.0f, qs.y + 6.0f, 0.36f, COL_INK,
+        text_left(app, qs.x + 6.0f, qs.y + 4.0f, 0.32f, COL_INK,
                   "CLEAR THE ROT");
     }
     snprintf(buf, sizeof(buf), "%d/%d", g->quest.progress, g->quest.target);
-    text_left(app, qs.x + 112.0f, qs.y + 5.0f, 0.4f, COL_INK, buf);
-    bar(qs.x + 150.0f, qs.y + 8.0f, 48.0f, 8.0f, frac, COL_BRASS_HI,
+    text_left(app, qs.x + 112.0f, qs.y + 3.0f, 0.36f, COL_INK, buf);
+    bar(qs.x + 150.0f, qs.y + 5.0f, 48.0f, 7.0f, frac, COL_BRASS_HI,
         COL_PAPER_LO);
     snprintf(buf, sizeof(buf), "COINS %d  SINEW %d", g->material_coins,
              g->material_sinew);
-    text_right(app, qs.x + qs.w - 6.0f, qs.y + 6.0f, 0.34f, COL_INK_SOFT, buf);
+    text_right(app, qs.x + qs.w - 6.0f, qs.y + 4.0f, 0.3f, COL_INK_SOFT, buf);
 
-    /* footer hint */
-    text_center(app, 160.0f, 224.0f, 0.3f, COL_BONE_DIM,
-                "TOUCH A TAB OR PRESS SELECT TO CYCLE");
+    /* footer hint: hard cap y <= 204 so the system font line box fits */
+    text_center(app, 160.0f, 202.0f, 0.28f, COL_BONE_DIM,
+                "TOUCH TABS OR PRESS SELECT");
 }
 /* ------------------------------------------------------------------ */
 /* WORLD page: valley map with zone nodes                             */
@@ -841,7 +840,7 @@ static void draw_world_page(const App *app)
     char buf[64];
     int i;
 
-    paper_panel(6.0f, CONTENT_Y, 308.0f, 132.0f);
+    paper_panel(6.0f, CONTENT_Y, 308.0f, 116.0f);
     text_left(app, 14.0f, CONTENT_Y + 3.0f, 0.34f, COL_INK_SOFT,
               "THE VALLEY");
     text_right(app, 306.0f, CONTENT_Y + 3.0f, 0.34f, COL_INK_SOFT,
@@ -857,8 +856,8 @@ static void draw_world_page(const App *app)
         line(170.0f, ly + 1.0f, 300.0f, ly, 1.0f,
              CLR(0x5A, 0x48, 0x30, 0x70));
     }
-    line(20.0f, 188.0f, 150.0f, 187.0f, 1.0f, CLR(0x5A, 0x48, 0x30, 0x70));
-    line(170.0f, 187.0f, 300.0f, 188.0f, 1.0f, CLR(0x5A, 0x48, 0x30, 0x70));
+    line(20.0f, 174.0f, 150.0f, 173.0f, 1.0f, CLR(0x5A, 0x48, 0x30, 0x70));
+    line(170.0f, 173.0f, 300.0f, 174.0f, 1.0f, CLR(0x5A, 0x48, 0x30, 0x70));
 
     /* dashed roads from the trailhead/current node to the other zones */
     {
@@ -890,22 +889,23 @@ static void draw_world_page(const App *app)
         draw_world_node(app, i, ui_world_node_rect(i));
 
     /* quest line + run/lifetime summary */
-    paper_panel(6.0f, 198.0f, 308.0f, 20.0f);
+    paper_panel(6.0f, 180.0f, 308.0f, 18.0f);
     if (g->quest.kind == QUEST_COLLECT) {
         snprintf(buf, sizeof(buf), "QUEST: GATHER %s",
                  grave_drop_name((GraveDrop)g->quest.material));
     } else {
         snprintf(buf, sizeof(buf), "QUEST: CLEAR THE ROT");
     }
-    text_left(app, 12.0f, 203.0f, 0.34f, COL_INK, buf);
+    text_left(app, 12.0f, 183.0f, 0.32f, COL_INK, buf);
     snprintf(buf, sizeof(buf), "%d/%d", g->quest.progress, g->quest.target);
-    text_right(app, 306.0f, 202.0f, 0.38f, COL_INK, buf);
+    text_right(app, 306.0f, 182.0f, 0.36f, COL_INK, buf);
 
+    /* TODO(v0.3): accuracy needs a shots-fired counter in the core. */
     snprintf(buf, sizeof(buf),
-             "COINS %d   SINEW %d   CHARMS %d   RUNS %d",
+             "COINS %d   SINEW %d   CHARMS %d   RUNS %d   ACC --",
              g->material_coins, g->material_sinew, g->material_bone_charms,
              g->zone_runs);
-    text_center(app, 160.0f, 223.0f, 0.3f, COL_BONE_DIM, buf);
+    text_center(app, 160.0f, 202.0f, 0.28f, COL_BONE_DIM, buf);
 }
 /* ------------------------------------------------------------------ */
 /* PACK page: weapons, materials, character stats                     */
@@ -927,15 +927,15 @@ static void draw_pack_weapon_card(const App *app, int index)
         fill_rect(r.x, r.y, r.w, r.h, CLR(0x6A, 0x5C, 0x44, 0xFF));
         fill_rect(r.x, r.y, 4.0f, r.h, CLR(0x44, 0x38, 0x28, 0xFF));
         if (spec != NULL && spec->name != NULL)
-            text_left(app, r.x + 12.0f, r.y + 3.0f, 0.44f,
+            text_left(app, r.x + 12.0f, r.y + 2.0f, 0.42f,
                       CLR(0x3A, 0x2E, 0x1E, 0xFF), spec->name);
-        text_right(app, r.x + r.w - 8.0f, r.y + 3.0f, 0.4f,
+        text_right(app, r.x + r.w - 8.0f, r.y + 2.0f, 0.36f,
                    CLR(0x3A, 0x2E, 0x1E, 0xFF), "NOT OWNED");
         if (spec != NULL) {
             snprintf(buf, sizeof(buf), "DMG %d   RNG %.0f   RELOAD %.1fs",
                      spec->damage, (double)spec->range,
                      (double)spec->reload_time);
-            text_left(app, r.x + 12.0f, r.y + 19.0f, 0.28f,
+            text_left(app, r.x + 12.0f, r.y + 16.0f, 0.26f,
                       CLR(0x3A, 0x2E, 0x1E, 0xFF), buf);
         }
         return;
@@ -954,19 +954,19 @@ static void draw_pack_weapon_card(const App *app, int index)
     }
 
     if (spec != NULL && spec->name != NULL)
-        text_left(app, r.x + 12.0f, r.y + 3.0f, 0.46f, COL_INK, spec->name);
+        text_left(app, r.x + 12.0f, r.y + 2.0f, 0.42f, COL_INK, spec->name);
 
     snprintf(buf, sizeof(buf), "%d / %d", ammo, mag);
-    text_right(app, r.x + r.w - 8.0f, r.y + 3.0f, 0.5f,
+    text_right(app, r.x + r.w - 8.0f, r.y + 2.0f, 0.44f,
                ammo > 0 ? COL_INK : COL_BLOOD, buf);
 
     if (spec != NULL) {
         snprintf(buf, sizeof(buf), "DMG %d   RNG %.0f   RELOAD %.1fs",
                  spec->damage, (double)spec->range, (double)spec->reload_time);
-        text_left(app, r.x + 12.0f, r.y + 19.0f, 0.3f, COL_INK_SOFT, buf);
+        text_left(app, r.x + 12.0f, r.y + 16.0f, 0.26f, COL_INK_SOFT, buf);
         snprintf(buf, sizeof(buf), "MAG %d   %s", spec->magazine,
                  selected ? "EQUIPPED" : "TAP TO EQUIP");
-        text_left(app, r.x + 12.0f, r.y + 32.0f, 0.3f,
+        text_left(app, r.x + 12.0f, r.y + 27.0f, 0.26f,
                   selected ? COL_BLOOD : COL_INK_SOFT, buf);
     }
 }
@@ -974,84 +974,76 @@ static void draw_pack_weapon_card(const App *app, int index)
 static void draw_pack_page(const App *app)
 {
     const GraveGame *g = &app->game;
-    UiRect panel = { 182.0f, CONTENT_Y, 132.0f, 174.0f };
+    UiRect panel = { 182.0f, CONTENT_Y, 132.0f, 142.0f };
     const Player *p = &g->player;
     char buf[64];
     int i;
 
     for (i = 0; i < WEAPON_COUNT; i++)
         draw_pack_weapon_card(app, i);
-    text_center(app, 160.0f, 223.0f, 0.3f, COL_BONE_DIM,
-                "TAP AN OWNED WEAPON TO EQUIP");
 
     /* right-hand character sheet */
     paper_panel(panel.x, panel.y, panel.w, panel.h);
-    text_shadow_center(app, panel.x + panel.w * 0.5f, panel.y + 5.0f, 0.4f,
+    text_shadow_center(app, panel.x + panel.w * 0.5f, panel.y + 4.0f, 0.38f,
                        COL_INK, "MATERIALS");
-    divider(panel.x + 8.0f, panel.y + 20.0f, panel.w - 16.0f);
+    divider(panel.x + 8.0f, panel.y + 18.0f, panel.w - 16.0f);
 
-    text_left(app, panel.x + 10.0f, panel.y + 25.0f, 0.34f, COL_INK_SOFT,
+    text_left(app, panel.x + 10.0f, panel.y + 22.0f, 0.28f, COL_INK_SOFT,
               "OLD COINS");
     snprintf(buf, sizeof(buf), "%d", g->material_coins);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 25.0f, 0.38f, COL_INK,
+    text_right(app, panel.x + panel.w - 8.0f, panel.y + 22.0f, 0.32f, COL_INK,
                buf);
-    text_left(app, panel.x + 10.0f, panel.y + 38.0f, 0.34f, COL_INK_SOFT,
+    text_left(app, panel.x + 10.0f, panel.y + 33.0f, 0.28f, COL_INK_SOFT,
               "ROT SINEW");
     snprintf(buf, sizeof(buf), "%d", g->material_sinew);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 38.0f, 0.38f, COL_INK,
+    text_right(app, panel.x + panel.w - 8.0f, panel.y + 33.0f, 0.32f, COL_INK,
                buf);
-    text_left(app, panel.x + 10.0f, panel.y + 51.0f, 0.34f, COL_INK_SOFT,
+    text_left(app, panel.x + 10.0f, panel.y + 44.0f, 0.28f, COL_INK_SOFT,
               "BONE CHARM");
     snprintf(buf, sizeof(buf), "%d", g->material_bone_charms);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 51.0f, 0.38f, COL_INK,
+    text_right(app, panel.x + panel.w - 8.0f, panel.y + 44.0f, 0.32f, COL_INK,
                buf);
 
-    divider(panel.x + 8.0f, panel.y + 66.0f, panel.w - 16.0f);
+    divider(panel.x + 8.0f, panel.y + 56.0f, panel.w - 16.0f);
 
-    text_shadow_center(app, panel.x + panel.w * 0.5f, panel.y + 71.0f, 0.4f,
+    text_shadow_center(app, panel.x + panel.w * 0.5f, panel.y + 59.0f, 0.38f,
                        COL_INK, "CHARACTER");
-    text_left(app, panel.x + 10.0f, panel.y + 85.0f, 0.3f, COL_INK_SOFT,
+    text_left(app, panel.x + 10.0f, panel.y + 72.0f, 0.28f, COL_INK_SOFT,
               "HEALTH");
     snprintf(buf, sizeof(buf), "%d/%d", (int)(p->hp + 0.5f),
              (int)(p->max_hp + 0.5f));
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 85.0f, 0.32f, COL_INK,
+    text_right(app, panel.x + panel.w - 8.0f, panel.y + 72.0f, 0.3f, COL_INK,
                buf);
-    bar(panel.x + 10.0f, panel.y + 95.0f, panel.w - 20.0f, 5.0f,
+    bar(panel.x + 10.0f, panel.y + 81.0f, panel.w - 20.0f, 5.0f,
         p->max_hp > 0.0f ? p->hp / p->max_hp : 0.0f, COL_BLOOD_HI,
         COL_PAPER_LO);
 
-    text_left(app, panel.x + 10.0f, panel.y + 104.0f, 0.3f, COL_INK_SOFT,
+    text_left(app, panel.x + 10.0f, panel.y + 89.0f, 0.28f, COL_INK_SOFT,
               "STAMINA");
     {
         float stam = p->stamina > 1.5f ? p->stamina / 100.0f : p->stamina;
 
-        bar(panel.x + 10.0f, panel.y + 114.0f, panel.w - 20.0f, 5.0f, stam,
+        bar(panel.x + 10.0f, panel.y + 98.0f, panel.w - 20.0f, 5.0f, stam,
             COL_STAM, COL_PAPER_LO);
     }
 
-    text_left(app, panel.x + 10.0f, panel.y + 124.0f, 0.3f, COL_INK_SOFT,
+    text_left(app, panel.x + 10.0f, panel.y + 106.0f, 0.28f, COL_INK_SOFT,
               "RUN KILLS");
     snprintf(buf, sizeof(buf), "%d", g->zombies_killed);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 124.0f, 0.32f, COL_INK,
+    text_right(app, panel.x + panel.w - 8.0f, panel.y + 106.0f, 0.3f, COL_INK,
                buf);
 
-    text_left(app, panel.x + 10.0f, panel.y + 136.0f, 0.3f, COL_INK_SOFT,
+    text_left(app, panel.x + 10.0f, panel.y + 117.0f, 0.28f, COL_INK_SOFT,
               "LIFETIME");
     snprintf(buf, sizeof(buf), "%d", g->total_kills);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 136.0f, 0.32f, COL_INK,
+    text_right(app, panel.x + panel.w - 8.0f, panel.y + 117.0f, 0.3f, COL_INK,
                buf);
 
-    text_left(app, panel.x + 10.0f, panel.y + 148.0f, 0.3f, COL_INK_SOFT,
+    text_left(app, panel.x + 10.0f, panel.y + 128.0f, 0.28f, COL_INK_SOFT,
               "ZONE RUNS");
     snprintf(buf, sizeof(buf), "%d", g->zone_runs);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 148.0f, 0.32f, COL_INK,
+    text_right(app, panel.x + panel.w - 8.0f, panel.y + 128.0f, 0.3f, COL_INK,
                buf);
-
-    /* TODO(v0.3): accuracy needs a shots-fired counter in the core. */
-    text_left(app, panel.x + 10.0f, panel.y + 160.0f, 0.3f, COL_INK_SOFT,
-              "ACC");
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 160.0f, 0.32f,
-               COL_INK_SOFT, "--");
 }
 /* ------------------------------------------------------------------ */
 /* HUD page (strip + tabs + one info page)                            */
@@ -1116,9 +1108,9 @@ static void caption_line(const App *app, float y, const char *left,
                          const char *right)
 {
     if (left != NULL)
-        text_left(app, 14.0f, y, 0.42f, COL_BONE_DIM, left);
+        text_left(app, 14.0f, y, 0.28f, COL_BONE_DIM, left);
     if (right != NULL)
-        text_right(app, 306.0f, y, 0.42f, COL_BONE_DIM, right);
+        text_right(app, 306.0f, y, 0.28f, COL_BONE_DIM, right);
 }
 
 static void draw_title(const App *app)
@@ -1129,36 +1121,36 @@ static void draw_title(const App *app)
     draw_background(app);
 
     /* hanging sign board behind the logo */
-    fill_rect(20.0f, 26.0f, 280.0f, 62.0f, COL_INK);
-    fill_rect(22.0f, 28.0f, 276.0f, 58.0f, CLR(0x3A, 0x2B, 0x1C, 0xFF));
+    fill_rect(20.0f, 22.0f, 280.0f, 58.0f, COL_INK);
+    fill_rect(22.0f, 24.0f, 276.0f, 54.0f, CLR(0x3A, 0x2B, 0x1C, 0xFF));
     for (i = 0; i < 276; i += 20)
-        fill_rect(22.0f + (float)i, 28.0f, 1.0f, 58.0f, COL_GRAIN);
-    circle(28.0f, 34.0f, 3.0f, COL_BRASS);
-    circle(292.0f, 34.0f, 3.0f, COL_BRASS);
-    circle(28.0f, 80.0f, 3.0f, COL_BRASS);
-    circle(292.0f, 80.0f, 3.0f, COL_BRASS);
+        fill_rect(22.0f + (float)i, 24.0f, 1.0f, 54.0f, COL_GRAIN);
+    circle(28.0f, 30.0f, 3.0f, COL_BRASS);
+    circle(292.0f, 30.0f, 3.0f, COL_BRASS);
+    circle(28.0f, 74.0f, 3.0f, COL_BRASS);
+    circle(292.0f, 74.0f, 3.0f, COL_BRASS);
 
-    text_woodcut_center(app, 160.0f, 32.0f, 1.3f, COL_BRASS_HI,
+    text_woodcut_center(app, 160.0f, 27.0f, 1.2f, COL_BRASS_HI,
                         "GRAVEPOWDER");
-    divider(50.0f, 76.0f, 220.0f);
-    text_center(app, 160.0f, 10.0f, 0.4f, COL_BONE_DIM,
+    divider(50.0f, 70.0f, 220.0f);
+    text_center(app, 160.0f, 6.0f, 0.38f, COL_BONE_DIM,
                 "A 3DS ZOMBIE SHOOTER");
 
     /* red zone ribbon */
-    fill_rect(96.0f, 94.0f, 128.0f, 20.0f, COL_BLOOD);
-    fill_rect(96.0f, 94.0f, 128.0f, 2.0f, COL_BLOOD_HI);
-    fill_rect(96.0f, 112.0f, 128.0f, 2.0f, COL_INK);
-    tri(96.0f, 94.0f, 88.0f, 104.0f, 96.0f, 114.0f, COL_BLOOD);
-    tri(224.0f, 94.0f, 232.0f, 104.0f, 224.0f, 114.0f, COL_BLOOD);
-    text_shadow_center(app, 160.0f, 96.0f, 0.5f, COL_BONE, "ASHEN MILL");
+    fill_rect(96.0f, 84.0f, 128.0f, 20.0f, COL_BLOOD);
+    fill_rect(96.0f, 84.0f, 128.0f, 2.0f, COL_BLOOD_HI);
+    fill_rect(96.0f, 102.0f, 128.0f, 2.0f, COL_INK);
+    tri(96.0f, 84.0f, 88.0f, 94.0f, 96.0f, 104.0f, COL_BLOOD);
+    tri(224.0f, 84.0f, 232.0f, 94.0f, 224.0f, 104.0f, COL_BLOOD);
+    text_shadow_center(app, 160.0f, 86.0f, 0.48f, COL_BONE, "ASHEN MILL");
 
     /* control hints on a dark board */
-    dark_panel(40.0f, 124.0f, 240.0f, 50.0f);
-    text_center(app, 160.0f, 129.0f, 0.42f, COL_BONE_DIM,
+    dark_panel(40.0f, 112.0f, 240.0f, 48.0f);
+    text_center(app, 160.0f, 116.0f, 0.38f, COL_BONE_DIM,
                 "PAD MOVE    TOUCH DRAG TO AIM");
-    text_center(app, 160.0f, 142.0f, 0.42f, COL_BONE_DIM,
+    text_center(app, 160.0f, 129.0f, 0.38f, COL_BONE_DIM,
                 "A FIRE    B RELOAD    X SWAP WEAPON");
-    text_center(app, 160.0f, 155.0f, 0.42f, COL_BONE_DIM,
+    text_center(app, 160.0f, 142.0f, 0.38f, COL_BONE_DIM,
                 "Y CAMERA    SELECT TABS    START PAUSE");
 
     /* start prompt */
@@ -1171,13 +1163,13 @@ static void draw_title(const App *app)
                            "PRESS A OR TAP START");
     }
 
-    divider(40.0f, 220.0f, 240.0f);
+    divider(40.0f, 196.0f, 240.0f);
     {
         char footer[48];
 
         snprintf(footer, sizeof(footer), "%s  -  %s", GRAVEPOWDER_VERSION,
                  grave_zone_name(ZONE_ASHEN_MILL));
-        caption_line(app, 224.0f, footer, "3DS HOMEBREW");
+        caption_line(app, 202.0f, footer, "3DS HOMEBREW");
     }
 }
 
@@ -1219,7 +1211,7 @@ static void draw_pause(const App *app)
                        "QUIT TO TITLE");
 
     snprintf(buf, sizeof(buf), "ZONE %s", grave_zone_name(g->zone));
-    text_center(app, 160.0f, 208.0f, 0.36f, COL_INK_SOFT, buf);
+    text_center(app, 160.0f, 196.0f, 0.32f, COL_INK_SOFT, buf);
 }
 
 static void draw_settings(const App *app)

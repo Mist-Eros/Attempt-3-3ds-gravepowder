@@ -10,7 +10,7 @@ converted `.gpm` files produced by `tools/import_model.py` (see [`docs/assets.md
 | `assets/models/hero_medieval.glb` | Medieval (modular body parts: Body/Head/Legs/Feet + 24 animations) | Quaternius | CC0 | https://poly.pizza/m/y9KWOVG21R |
 | `assets/models/zombie_animated.glb` | Animated Zombie (13 animations) | bachosoftdesign | CC-BY 3.0 | https://poly.pizza/m/xqEzosAVYX |
 | `assets/models/gun_flintlock.glb` | Pistol | Quaternius | CC0 | https://poly.pizza/m/ldAlSSvuqT |
-| `assets/models/gun_revolver.glb` | Revolver | — | CC-BY 3.0 | https://poly.pizza/m/fGBhJzY228W |
+| `assets/models/gun_revolver.glb` | Revolver | zeilmannnoah | CC-BY 3.0 | https://poly.pizza/m/fGBhJzY228W |
 | `assets/models/gun_musket.glb` | Rifle | Quaternius | CC0 | https://poly.pizza/m/neEjwx9bBJ |
 
 ## Attribution requirements
@@ -19,7 +19,7 @@ CC0 assets need no credit (but we credit anyway, because it's polite and the REA
 section). **CC-BY assets must be credited** in redistributed builds and in the README/release notes:
 
 - *Animated Zombie* by **bachosoftdesign** — CC-BY 3.0 — https://poly.pizza/m/xqEzosAVYX
-- *Revolver* by its Poly Pizza author — CC-BY 3.0 — https://poly.pizza/m/fGBhJzY228W
+- *Revolver* by **zeilmannnoah** — CC-BY 3.0 — https://poly.pizza/m/fGBhJzY228W
 - (also kept for reference/swap options, not currently shipped: *Furry boi v2* by Yogoshimo 2.0 —
   CC-BY 3.0 — https://poly.pizza/m/bprrVO3Jw0t)
 

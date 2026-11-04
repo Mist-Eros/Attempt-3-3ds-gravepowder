@@ -23,5 +23,16 @@
     "death": "CharacterArmature|Death"
   },
   "resample_hz": 30,
-  "notes": "Quaternius Medieval pack (CC0). We drop the imported head mesh and hang the procedural wolf head/ears/tail off the Head/Hips bones. Body recoloured toward a dusty coat; the importer applies colour_overrides per source mesh. Hand joint is Wrist.R in this rig (validated against the GLB)."
+  "colour_multiply": {
+    "Medieval_Body": [1.55, 1.15, 0.85],
+    "Medieval_Legs": [1.05, 0.95, 0.85],
+    "Medieval_Feet": [1.2, 1.0, 0.8],
+    "Black": [1.65, 1.45, 1.1],
+    "DarkBrown": [1.1, 1.15, 1.2],
+    "LightBrown": [0.85, 0.95, 1.05],
+    "Skin": [0.62, 0.78, 0.95],
+    "Gold": [0.7, 0.85, 1.0],
+    "Metal": [0.62, 0.6, 0.6]
+  },
+  "notes": "Quaternius Medieval pack (CC0). We drop the imported head mesh and hang the procedural wolf head/ears/tail off the Head/Hips bones. The coat is lifted toward dust-lit leather with colour_multiply (display-space gains; texture/material detail kept) instead of a flat override. Hand joint is Wrist.R in this rig (validated against the GLB)."
 }
