@@ -35,4 +35,13 @@ uint32_t audio_event_count(void);
 void audio_set_muted(bool muted);
 bool audio_is_muted(void);
 
+/*
+ * Append-only extension: tell the mixer which weapon is equipped so SHOOT and
+ * RELOAD can pick the matching report (REVOLVER has three shot variants).
+ * Pass a WeaponId value from grave.h (0 = flintlock, 1 = revolver, 2 = musket).
+ * The portable fallback only records it; the 3DS backend defaults to the
+ * flintlock until the app layer calls this (once at startup / on switch).
+ */
+void audio_set_weapon(int weapon_id);
+
 #endif /* GRAVEPOWDER_AUDIO_H */
