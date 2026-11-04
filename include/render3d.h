@@ -40,4 +40,21 @@ void r3d_draw_box(const C3D_Mtx *view, float x, float y, float z,
  * renderer draws a normal mono frame. */
 void r3d_set_stereo(float iod, bool enabled);
 
+/* ------------------------------------------------------------------ */
+/* addenda (shooter-render, additive only)                            */
+/* ------------------------------------------------------------------ */
+
+/* Replaces the built-in procedural wolf with a user-supplied rig (see
+ * source/mesh.h for the HeroRig format: part meshes + parents + joint pivots
+ * + animation channels).  Pass NULL to restore the built-in hero.  The rig is
+ * borrowed, not copied: keep it alive for as long as it is installed. */
+struct HeroRig;
+void r3d_set_hero_rig(const struct HeroRig *rig);
+
+/* Debug/telemetry helpers: stats for the last r3d_draw_world() call and the
+ * total size of the baked mesh data. */
+void r3d_frame_stats(unsigned *draw_calls, unsigned *vertex_count);
+unsigned r3d_mesh_bytes(void);
+unsigned r3d_mesh_vertices(void);
+
 #endif /* GRAVEPOWDER_RENDER3D_H */

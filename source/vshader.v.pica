@@ -1,27 +1,54 @@
-; Gravepowder - minimal vertex shader for the 3D pipeline skeleton
+; Gravepowder - low-poly world vertex shader
 ;
-; position: 3 floats (v0)
-; colour:   4 floats via the fixed attribute (v1); the fragment stage just
-;           outputs this primary colour (see C3D_TexEnv in main.c).
-
+; Vertex layout (interleaved, 36 bytes):
+;   v0 = position (3 floats)
+;   v1 = normal   (3 floats)
+;   v2 = albedo   (3 floats)  - flat per-face colour, multiplied by `tint`
+;
+; Uniforms:
+;   projection  : view -> clip
+;   modelView   : world -> view
+;   tint        : rgb multiplies the vertex albedo, w = "unlit" factor
+;                 (0 = fully lit, 1 = full-bright: eye glow, tracer, flash)
+;   lightDir    : direction TOWARDS the sun, view space
+;   lightColor  : sun colour
+;   ambient     : flat ambient colour
+;   fillColor   : camera-facing fill light (lifts silhouettes readably)
+;   fogColor    : colour of the haze (matches the sky clear colour)
+;   fogParams   : x = -near * invRange, y = -invRange
+;                 so fog = clamp(viewZ * y + x, 0, 1)
+;
+; The 3DS GPU has fixed-function fog, but doing it per-vertex here keeps the
+; fog colour identical to the clear colour and works with any citro3d setup.
+; NOTE: picasso wants uniforms/constants in source 1 and registers in source 2
+; for two-source instructions, so the code below is written that way.
 .fvec projection[4]
 .fvec modelView[4]
+.fvec tint
+.fvec lightDir
+.fvec lightColor
+.fvec ambient
+.fvec fillColor
+.fvec fogColor
+.fvec fogParams
 
-.constf one(1.0, 1.0, 1.0, 1.0)
-.alias ones one.xxxx
+.constf consts(1.0, 0.0, 0.0, 0.0)
+.alias ones  consts.xxxx
+.alias zeros consts.yyyy
 
 .out outpos position
 .out outclr color
 
 .alias inpos v0
-.alias inclr v1
+.alias innrm v1
+.alias incol v2
 
 .proc main
     ; r0 = (position, 1)
     mov r0.xyz, inpos
     mov r0.w,   ones
 
-    ; r1 = modelView * r0
+    ; r1 = modelView * position (view space)
     dp4 r1.x, modelView[0], r0
     dp4 r1.y, modelView[1], r0
     dp4 r1.z, modelView[2], r0
@@ -33,6 +60,57 @@
     dp4 outpos.z, projection[2], r1
     dp4 outpos.w, projection[3], r1
 
-    mov outclr, inclr
+    ; r3 = normalize(modelView * normal)
+    mov r2.xyz, innrm
+    mov r2.w,   zeros
+    dp4 r3.x, modelView[0], r2
+    dp4 r3.y, modelView[1], r2
+    dp4 r3.z, modelView[2], r2
+    dp3 r4.x, r3, r3
+    rsq r4.x, r4.x
+    mul r3,   r3, r4.xxxx
+
+    ; key light: ndotl
+    mov r2, lightDir
+    dp3 r4.x, r2, r3
+    max r4.x, zeros, r4.x
+
+    ; shade = ambient + lightColor * ndotl
+    mov r2, lightColor
+    mul r5, r2, r4.xxxx
+    mov r2, ambient
+    add r5, r2, r5
+
+    ; camera-facing fill: ndotv approximation (view space n.z)
+    max r4.x, zeros, r3.zzzz
+    mov r2, fillColor
+    mul r6, r2, r4.xxxx
+    add r5, r5, r6
+
+    ; shade += tint.w * (1 - shade)   [unlit / emissive]
+    mov r2, tint
+    add r6, ones, -r5
+    mul r6, r6, r2.wwww
+    add r5, r5, r6
+
+    ; colour = shade * albedo * tint.rgb
+    mov r6.xyz, incol
+    mov r6.w, ones
+    mul r6, r2, r6
+    mul r5, r5, r6
+    min r5, ones, r5
+
+    ; per-vertex fog from view-space depth
+    mul r7.x, fogParams.y, r1.z
+    add r7.x, fogParams.x, r7.x
+    max r7.x, zeros, r7.x
+    min r7.x, ones, r7.x
+
+    ; out = colour + fog * (fogColour - colour)
+    add r6, fogColor, -r5
+    mul r6, r6, r7.xxxx
+    add r5, r5, r6
+    mov r5.w, ones
+    mov outclr, r5
     end
 .end
