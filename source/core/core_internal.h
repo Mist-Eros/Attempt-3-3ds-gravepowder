@@ -41,8 +41,22 @@
 #define GRAVE_PITCH_LIMIT           1.30f  /* ~74 degrees up/down                   */
 
 #define GRAVE_RECOIL_AIM_SHARE      0.5f   /* % of the camera kick that moves the shot */
-#define GRAVE_RECOIL_RECOVERY       9.0f   /* exponential decay rate per second     */
+#define GRAVE_RECOIL_RECOVERY       11.0f  /* exponential decay rate per second      */
 #define GRAVE_ANIM_WALK_RATE        7.0f   /* walk-cycle radians per second at walk */
+
+/* ---- v0.4: movement feel + aiming --------------------------------- */
+
+/* Horizontal velocity approaches the wish velocity instead of snapping. */
+#define GRAVE_MOVE_ACCEL            14.0f  /* m/s^2 when speeding up               */
+#define GRAVE_MOVE_DECEL            18.0f  /* m/s^2 when slowing down / turning    */
+
+/* Aim (held): slower walk, tighter spread, softer kick, scoped camera. */
+#define GRAVE_AIM_MOVE_SCALE        0.55f  /* walk speed multiplier while aiming  */
+#define GRAVE_AIM_SPREAD_SCALE      0.35f  /* weapon spread multiplier            */
+#define GRAVE_AIM_RECOIL_SCALE      0.70f  /* weapon kick multiplier              */
+#define GRAVE_AIM_FOV               50.0f  /* vertical FOV while aiming, degrees  */
+#define GRAVE_AIM_TP_DISTANCE       2.0f   /* third-person camera distance, metres */
+#define GRAVE_AIM_ASSIST_RAD        0.05f  /* ~2.9 deg cone for missing shots      */
 
 /* ---- weapons ------------------------------------------------------ */
 

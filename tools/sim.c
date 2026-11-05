@@ -1,5 +1,5 @@
 /*
- * Gravepowder - headless gameplay sim (v0.3: three-zone campaign, trader, Foreman)
+ * Gravepowder - headless gameplay sim (v0.4: three-zone campaign, trader, Foreman)
  *
  * Runs the real portable core with a scripted "player bot": walk toward the
  * nearest threat, aim, shoot when roughly on target, reload, collect drops.
@@ -21,7 +21,7 @@
 #include "core_internal.h"
 
 #define SIM_DT        (1.0f / 60.0f)
-#define SIM_MAX_STEPS (60 * 300) /* give up on a zone after 5 simulated minutes */
+#define SIM_MAX_STEPS (60 * 480) /* give up on a zone after 8 simulated minutes */
 #define SIM_SEED      2024u
 
 typedef struct {
@@ -202,7 +202,7 @@ static void aim_at(const GraveGame *g, Vec3 target, GraveInput *in,
     desired_pitch = grave_clampf(desired_pitch, -GRAVE_PITCH_LIMIT, GRAVE_PITCH_LIMIT);
     pitch_err = desired_pitch - p->transform.pitch;
 
-    in->look_x = grave_clampf(yaw_err / GRAVE_LOOK_YAW_PER_UNIT, -1.0f, 1.0f);
+    in->look_x = grave_clampf(-yaw_err / GRAVE_LOOK_YAW_PER_UNIT, -1.0f, 1.0f);
     in->look_y = grave_clampf(-pitch_err / GRAVE_LOOK_PITCH_PER_UNIT, -1.0f, 1.0f);
 
     *yaw_err_out = yaw_err;
@@ -255,15 +255,17 @@ static void sim_think(const GraveGame *g, GraveInput *in, SimBrain *brain)
         const ZombieSpec *zspec = grave_zombie_spec(z->type);
         float range = grave_weapon_spec(p->weapon)->range;
         Vec3 target = z->pos;
+        bool panic = (p->hp < 0.45f * p->max_hp);
 
         target.y = zspec->body_height * 0.55f;
         aim_at(g, target, in, &yaw_err, &pitch_err);
 
         /* Kite: hold a shooting band, sprint out when they crowd us.  The
          * Foreman is slow and has a big reach, so the bot keeps a much wider
-         * berth against him (that is the whole boss fight). */
+         * berth against him (that is the whole boss fight).  At low hp the bot
+         * widens the band and prioritises running, since a hit can kill it. */
         if (z->type == ZOMBIE_FOREMAN) {
-            if (zdist < 5.4f) {
+            if (zdist < (panic ? 7.0f : 5.4f)) {
                 in->move_y = -1.0f;
                 in->sprint = true;
             } else if (zdist > 8.5f) {
@@ -271,17 +273,29 @@ static void sim_think(const GraveGame *g, GraveInput *in, SimBrain *brain)
             } else {
                 in->move_x = (brain->strafe_dir >= 0.0f) ? 0.30f : -0.30f;
             }
-        } else if (zdist > 6.5f) {
-            in->move_y = 1.0f;
-            in->sprint = zdist > 10.0f;
-        } else if (zdist < 3.4f || zombies_within(g, 3.0f) >= 2) {
+        } else if (panic && zdist < 6.0f) {
             in->move_y = -1.0f;
             in->sprint = true;
+        } else if (zdist < 4.6f || zombies_within(g, 3.5f) >= 2) {
+            /* pre-emptive retreat: movement now ramps up, so leave a little
+             * earlier than the raw melee reach to stay ahead of the pack */
+            in->move_y = -1.0f;
+            in->sprint = true;
+        } else if (zdist > 7.0f) {
+            in->move_y = 1.0f;
+            in->sprint = zdist > 10.0f;
         } else {
             in->move_x = (brain->strafe_dir >= 0.0f) ? 0.55f : -0.55f;
         }
 
-        if (fabsf(yaw_err) < 0.12f && fabsf(pitch_err) < 0.18f &&
+        /* v0.4: hold aim during the Foreman duel (while not sprinting out of
+         * his reach) for the tighter spread and scoped camera.  Normal horde
+         * fights stay hip-fire: the aim walk cap would let runners catch the
+         * kiting bot. */
+        in->aim = (z->type == ZOMBIE_FOREMAN && !in->sprint &&
+                   zdist > 5.0f && zdist < range * 0.9f);
+
+        if (fabsf(yaw_err) < 0.06f && fabsf(pitch_err) < 0.12f &&
             zdist < range * 0.85f && zdist > 0.9f &&
             p->ammo[p->weapon] > 0 && p->reload_timer <= 0.0f &&
             p->fire_cooldown <= 0.0f)
@@ -628,7 +642,7 @@ int main(int argc, char **argv)
     bool shop_ok;
     bool plain_ok = false;
 
-    printf("== Gravepowder headless sim (v0.3: the Foreman) ==\n");
+    printf("== Gravepowder headless sim (v0.4: steady hands) ==\n");
     printf("fixed 60 Hz steps, no rendering; seed=%u\n\n", (unsigned)SIM_SEED);
 
     shop_ok = run_campaign(true, &shopped);

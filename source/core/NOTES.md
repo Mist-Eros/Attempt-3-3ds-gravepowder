@@ -170,3 +170,112 @@ in `data.c` is the single tuning knob (it is a data-only change).
   only simulates. Save images are C-layout based; checksum is a corruption
   guard, not security.
 - Pools are hard caps; full pools silently skip drops/spawns.
+
+---
+
+# v0.4 "Steady Hands" — controls / feel (append-only)
+
+Motivation: on real hardware the left stick moved the player the "wrong" way,
+yaw drag was mirrored, there was no way to turn around, and aiming/gyro were
+missing. Root cause: the core's screen-right basis disagreed with the
+renderer's camera basis (`fwd × up`), so strafe and yaw drag were both mirrored.
+
+## Screen-space conventions (the one thing to remember)
+
+```
+aim/forward fwd(yaw)   = ( sin yaw, 0,  cos yaw)
+screen-right flat_right(yaw) = (-cos yaw, 0,  sin yaw)   = fwd × up
+```
+
+At yaw 0 the player faces +z, so **screen-right is world −x**. Positive yaw
+rotates towards +x, which is screen-LEFT. Everything input-facing follows:
+
+- stick `move_x>0` = screen-right; camera over-the-shoulder pivot offsets
+  screen-right (TP camera now shifts to −x at yaw 0).
+- touch `look_x>0` = drag/turn right on screen → `yaw -= look_x * 2.2`.
+- `look_y>0` = look down → `pitch -= look_y * 1.6` (unchanged).
+- gyro `gyro_yaw>0` rad/s = turn right on screen → `yaw -= gyro_yaw * dt`;
+  `gyro_pitch>0` = look up → `pitch += gyro_pitch * dt`.
+- The renderer needed **no change**: it consumes `camera_pos/look/fov` and the
+  core's `flat_right` now matches its `fwd × up` basis.
+
+## New append-only API (`include/grave.h`)
+
+- `GraveInput += bool aim; float gyro_yaw; float gyro_pitch;`
+  - `aim` = the L button held. `gyro_*` = rad/s supplied by the app's motion
+    read (app applies gyro_mode/sens and the actual hardware scaling first; the
+    core only integrates rates). Positive conventions above.
+- `Player += bool aiming; float vel_x, vel_z;`
+  - `aiming` mirrors held aim (UI/animation/VFX); `vel_*` is the internal
+    horizontal velocity state for the acceleration model (UI can ignore).
+- `GraveSettings += uint8_t gyro_mode; uint8_t gyro_sens;`
+  - `GraveGyroMode { ON=0 (default), OFF=1, INVERT=2 }`,
+    `GraveGyroSens { MED=0 (default), LOW=1, HIGH=2 }` (append-only enums).
+  - Persisted in `SaveData.reserved[0]`/`[1]`: **save version stays 3 and the
+    image stays 108 bytes**; pre-v0.4 images (zeroed reserved) load as ON/MED,
+    junk values sanitise to ON/MED.
+- No new functions. Renderer/app read `player.aiming` / `camera_fov` as before.
+
+## Aiming effects (`core_internal.h` constants)
+
+| constant | value | effect |
+|---|---|---|
+| `GRAVE_AIM_MOVE_SCALE` | 0.55 | move target speed ×0.55 while aiming; sprint disabled |
+| `GRAVE_AIM_SPREAD_SCALE` | 0.35 | shot spread ×0.35 while aiming |
+| `GRAVE_AIM_RECOIL_SCALE` | 0.70 | weapon kick ×0.70 while aiming |
+| `GRAVE_AIM_FOV` | 50.0° | vertical FOV in **both** camera modes while aiming |
+| `GRAVE_AIM_TP_DISTANCE` | 2.0 m | third-person camera distance while aiming (shoulder + wall pull-in kept) |
+| `GRAVE_AIM_ASSIST_RAD` | 0.05 rad (~2.9°) | aim-assist cone |
+| `GRAVE_MOVE_ACCEL` / `GRAVE_MOVE_DECEL` | 14 / 18 m/s² | velocity ramp to/from the wish speed |
+| `GRAVE_RECOIL_RECOVERY` | 11/s (was 9) | slightly faster recoil recovery |
+
+- **Aim assist**: when `aiming` and the direct hitscan ray misses, the nearest
+  zombie whose direction is within `GRAVE_AIM_ASSIST_RAD` of the aim ray, is
+  inside weapon range and has a clear line of fire (props checked) takes the
+  hit as a normal body hit (no headshot bonus). Hip-fire never assists.
+- **Movement feel**: horizontal velocity approaches the target velocity at
+  14 m/s² (accelerating) / 18 m/s² (slowing or turning); collision/position
+  resolution is unchanged, and velocity is re-derived from the resolved motion
+  so walls do not wind it up. Walk/sprint speeds and stamina are unchanged.
+- Enemy/quest/shop/save tuning was **not** touched in v0.4.
+
+## Verification (v0.4)
+
+- Host tests: **4024 checks, 0 failed** (`-Wall -Wextra -pedantic` clean).
+  New suites: axis/gyro geometry, aiming (speed/FOV/camera/recoil/spread/aim
+  assist incl. range + LOS negatives), gyro settings round-trip,
+  pre-v0.4-image compat and junk-value sanitising; stress now feeds aim/gyro
+  and checks velocity/pitch invariants.
+- 3DS build: clean `build3ds.cmd`, warning-free.
+- `sizeof(GraveGame)` 13668 → **13680 B** (+12 B: aiming bool + velocity pair);
+  `SaveData` 128? no — **108 B unchanged**; `GraveSettings` 6 B;
+  `GraveInput` 32 B.
+
+### Headless sim (seed 2024, fixed 1/60, bot updated for v0.4)
+
+| run | Ashen Mill | Bone Orchard | Old Mine | Campaign | Foreman | End HP |
+|---|---|---|---|---|---|---|
+| with trader | 83.2 s | 195.1 s | 319.2 s | **597.5 s** (~10 min) | spawn 210.1 s, kill 294.7 s (**84.6 s fight**) | 104/140 |
+| `--plain` (no shop) | 83.2 s | 195.1 s | 273.2 s | **551.5 s** (~9.2 min) | spawn 162.3 s, kill 254.7 s (**92.4 s fight**) | 69/100 |
+
+Both runs clear all 3 zones incl. the Foreman, world_complete = 1,
+cleared [1 1 1], 0 deaths, no boss hits taken (kiting). Bot changes for v0.4:
+`look_x` sign flipped for the new yaw convention (steering fixed), pre-emptive
+retreat band (4.6 m / 2+ crowded) because acceleration ramps kiting speed,
+panic widen at <45% HP, boss-only hold-aim (aim walk cap would let runners
+catch the bot mid-horde). The sim zone cap was raised to 8 simulated minutes so
+slow-but-alive kiting runs are not called timeouts; the longer times are the
+bot's cautious play, not a game-tuning change.
+
+## Front-end notes (engine-3ds)
+
+- L = aim, R = fire: app sets `input.aim` / `input.fire`; no core change needed.
+- Gyro: read sensor rates once per frame, apply mode/sens (ON/OFF/INVERT;
+  LOW/MED/HIGH) in the app, then fill `gyro_yaw`/`gyro_pitch` in rad/s with the
+  sign conventions above. Store the two setting bytes in `GraveSettings` and
+  pass it to save/load (they ride in `reserved`; no save version bump).
+- Goal/scoped camera comes free from `grave_update_camera` (`camera_fov` 50
+  while aiming; TP distance 2.0 m) — do not hard-code FOV in the renderer.
+- `player.aiming` can drive reticle/VFX; reload HUD keeps using
+  `player.reload_duration`.
+

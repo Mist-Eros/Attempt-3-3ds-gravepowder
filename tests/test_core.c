@@ -821,7 +821,9 @@ static void test_movement(void)
     in.move_y = 1.0f;
     for (int i = 0; i < 30; i++)
         step_with(&g, &in);
-    CHECK_NEAR(g.player.transform.pos.z, 2.1f, 0.02f, "walk forward distance");
+    /* v0.4: acceleration ramps up over ~0.3 s, so 0.5 s of walking covers
+     * ~1.5 m (continuous: 0.5*a*t_ramp + v*(t-t_ramp)) */
+    CHECK_NEAR(g.player.transform.pos.z, 1.5f, 0.06f, "walk forward distance");
     CHECK_NEAR(g.player.transform.pos.x, 0.0f, 0.001f, "walk forward x");
     CHECK(g.player.anim_speed > 0.9f);
     CHECK(g.player.anim_time > 0.1f);
@@ -834,20 +836,20 @@ static void test_movement(void)
     in.move_y = 1.0f;
     for (int i = 0; i < 30; i++)
         step_with(&g, &in);
-    CHECK_NEAR(g.player.transform.pos.x, 2.1f, 0.02f, "forward at yaw pi/2");
+    CHECK_NEAR(g.player.transform.pos.x, 1.5f, 0.06f, "forward at yaw pi/2");
     CHECK_NEAR(g.player.transform.pos.z, 0.0f, 0.001f, "forward at yaw pi/2 z");
 
-    /* strafe right is +x at yaw 0 */
+    /* strafe right is screen-right = world -x at yaw 0 (v0.4 axis fix) */
     quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
     clear_props(&g);
     grave_input_reset(&in);
     in.move_x = 1.0f;
     for (int i = 0; i < 30; i++)
         step_with(&g, &in);
-    CHECK_NEAR(g.player.transform.pos.x, 2.1f, 0.02f, "strafe right");
+    CHECK_NEAR(g.player.transform.pos.x, -1.5f, 0.06f, "strafe right is screen-right (-x)");
     CHECK_NEAR(g.player.transform.pos.z, 0.0f, 0.001f, "strafe right z");
 
-    /* diagonal input is normalised: 30 steps at walk speed == 2.1 m total */
+    /* diagonal input is normalised (same ~1.5 m ramp distance) */
     quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
     clear_props(&g);
     grave_input_reset(&in);
@@ -857,7 +859,7 @@ static void test_movement(void)
         step_with(&g, &in);
     CHECK_NEAR(sqrtf(g.player.transform.pos.x * g.player.transform.pos.x +
                      g.player.transform.pos.z * g.player.transform.pos.z),
-               2.1f, 0.02f, "diagonal normalised");
+               1.5f, 0.06f, "diagonal normalised");
 
     /* sprint is faster and drains stamina */
     quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
@@ -865,12 +867,11 @@ static void test_movement(void)
     grave_input_reset(&in);
     in.move_y = 1.0f;
     in.sprint = true;
-    for (int i = 0; i < 30; i++)
+    for (int i = 0; i < 60; i++)
         step_with(&g, &in);
-    CHECK_NEAR(g.player.transform.pos.z, GRAVE_PLAYER_SPRINT_SPEED * 0.5f, 0.03f,
-               "sprint distance");
-    CHECK(g.player.transform.pos.z > 2.5f);
-    CHECK(g.player.stamina < 95.0f);
+    /* 1 s sprint from rest: ramp (v^2/2a) + sustained run ~= 5.0 m */
+    CHECK(g.player.transform.pos.z > 4.5f && g.player.transform.pos.z < 5.6f);
+    CHECK(g.player.stamina > 70.0f && g.player.stamina < 80.0f);
     CHECK(g.player.anim_speed > 1.2f);
 
     /* idle player doesn't move and the walk phase stays put */
@@ -931,7 +932,8 @@ static void test_collision(void)
     CHECK_NEAR(g.player.transform.pos.z, 0.65f, 0.02f, "crate collision stop");
     CHECK(g.player.transform.pos.z < 1.0f);
 
-    /* diagonal into a long wall slides along +x instead of stopping dead */
+    /* diagonal into a long wall slides along screen-right (-x) instead of
+     * stopping dead (v0.4 axis fix) */
     quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
     clear_props(&g);
     add_test_prop(&g, vec3_make(0.0f, 0.0f, 2.0f), vec3_make(10.0f, 1.0f, 1.0f), PROP_FENCE);
@@ -940,7 +942,7 @@ static void test_collision(void)
     in.move_y = 1.0f;
     for (int i = 0; i < 120; i++)
         step_with(&g, &in);
-    CHECK(g.player.transform.pos.x > 2.0f);
+    CHECK(g.player.transform.pos.x < -2.0f);
     CHECK(g.player.transform.pos.z <= 0.7f);
 
     /* walking into the corner of a barrel */
@@ -970,7 +972,9 @@ static void test_look(void)
     grave_input_reset(&in);
     in.look_x = 1.0f;
     step_with(&g, &in);
-    CHECK_NEAR(g.player.transform.yaw, GRAVE_LOOK_YAW_PER_UNIT, 0.001f, "touch yaw");
+    /* v0.4: positive look_x = turn right on screen = yaw decreases */
+    CHECK_NEAR(g.player.transform.yaw, -GRAVE_LOOK_YAW_PER_UNIT, 0.001f,
+               "touch yaw right turns right on screen");
 
     grave_input_reset(&in);
     in.look_y = 1.0f; /* drag down = look down, clamped at the pitch limit */
@@ -1002,7 +1006,7 @@ static void test_look(void)
     step_with(&g, &in);
     CHECK(g.player.transform.yaw >= -GRAVE_PI - 0.001f);
     CHECK(g.player.transform.yaw <= GRAVE_PI + 0.001f);
-    CHECK_NEAR(g.player.transform.yaw, grave_wrap_pi(3.0f + GRAVE_LOOK_YAW_PER_UNIT),
+    CHECK_NEAR(g.player.transform.yaw, grave_wrap_pi(3.0f - GRAVE_LOOK_YAW_PER_UNIT),
                0.001f, "yaw wrapped");
 }
 
@@ -2286,6 +2290,417 @@ static void test_accuracy(void)
 }
 
 /* ================================================================== */
+/* v0.4: axis fix, gyro, aiming, settings                              */
+/* ================================================================== */
+
+static void test_axis_and_gyro(void)
+{
+    GraveGame g;
+    GraveInput in;
+    float speed;
+
+    /* stick right = screen-right = world -x at yaw 0 (fwd x up) */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.move_x = 1.0f;
+    for (int i = 0; i < 60; i++)
+        step_with(&g, &in);
+    CHECK(g.player.transform.pos.x < -2.0f);
+    CHECK_NEAR(g.player.transform.pos.z, 0.0f, 0.001f, "stick right stays on z");
+
+    /* stick forward is still +z at yaw 0 */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.move_y = 1.0f;
+    for (int i = 0; i < 60; i++)
+        step_with(&g, &in);
+    CHECK(g.player.transform.pos.z > 3.0f);
+    CHECK_NEAR(g.player.transform.pos.x, 0.0f, 0.001f, "forward stays on x");
+
+    /* positive look_x = turn right on screen = yaw decreases */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.look_x = 1.0f;
+    step_with(&g, &in);
+    CHECK_NEAR(g.player.transform.yaw, -GRAVE_LOOK_YAW_PER_UNIT, 0.001f,
+               "look_x right decreases yaw");
+
+    /* gyro rates: positive gyro_yaw = turn right on screen (rad/s) */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.gyro_yaw = 1.0f;
+    step_with(&g, &in);
+    CHECK_NEAR(g.player.transform.yaw, -TEST_DT, 1.0e-5f, "gyro yaw right");
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.gyro_yaw = -2.0f;
+    step_with(&g, &in);
+    CHECK_NEAR(g.player.transform.yaw, 2.0f * TEST_DT, 1.0e-5f, "gyro yaw left");
+
+    /* positive gyro_pitch = look up */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.gyro_pitch = 1.0f;
+    step_with(&g, &in);
+    CHECK_NEAR(g.player.transform.pitch, TEST_DT, 1.0e-5f, "gyro pitch up");
+
+    /* touch look and gyro combine on the same step */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.look_x = 1.0f;
+    in.gyro_yaw = 1.0f;
+    step_with(&g, &in);
+    CHECK_NEAR(g.player.transform.yaw,
+               -GRAVE_LOOK_YAW_PER_UNIT - TEST_DT, 1.0e-4f,
+               "look + gyro combine");
+
+    /* gyro pitch still respects the ±74 degree clamp */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.gyro_pitch = 5.0f;
+    for (int i = 0; i < 60; i++)
+        step_with(&g, &in);
+    CHECK_NEAR(g.player.transform.pitch, GRAVE_PITCH_LIMIT, 1.0e-4f,
+               "gyro pitch clamps up");
+
+    /* player.aiming mirrors the held aim input */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.aim = true;
+    step_with(&g, &in);
+    CHECK(g.player.aiming);
+    grave_input_reset(&in);
+    step_with(&g, &in);
+    CHECK(!g.player.aiming);
+
+    /* acceleration: not instant, ramps up, decelerates to rest */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.move_y = 1.0f;
+    step_with(&g, &in);
+    CHECK(g.player.transform.pos.z > 0.0f && g.player.transform.pos.z < 0.02f);
+    CHECK(g.player.vel_z > 0.1f && g.player.vel_z < 0.5f);
+    for (int i = 0; i < 29; i++)
+        step_with(&g, &in);
+    speed = sqrtf(g.player.vel_x * g.player.vel_x + g.player.vel_z * g.player.vel_z);
+    CHECK_NEAR(speed, GRAVE_PLAYER_WALK_SPEED, 0.02f, "ramps to walk speed");
+    grave_input_reset(&in);
+    for (int i = 0; i < 30; i++)
+        step_with(&g, &in);
+    speed = sqrtf(g.player.vel_x * g.player.vel_x + g.player.vel_z * g.player.vel_z);
+    CHECK(speed < 0.05f);
+    CHECK_NEAR(g.player.anim_speed, 0.0f, 1.0e-4f, "idle anim after stopping");
+
+    /* deterministic movement with aim/gyro on the input tape */
+    {
+        GraveGame a;
+        GraveGame b;
+        GraveInput tape;
+        for (int which = 0; which < 2; which++) {
+            GraveGame *gp = which == 0 ? &a : &b;
+            grave_game_init(gp, 4242u);
+            grave_game_start_zone(gp, ZONE_ASHEN_MILL);
+            clear_props(gp);
+            gp->spawn_budget = 0;
+            gp->spawn_timer = 1.0e9f;
+            memset(gp->zombies, 0, sizeof(gp->zombies));
+            memset(gp->pickups, 0, sizeof(gp->pickups));
+            memset(gp->shot_traces, 0, sizeof(gp->shot_traces));
+            gp->player.transform.pos = vec3_make(0.0f, 0.0f, 0.0f);
+            gp->player.transform.yaw = 0.0f;
+            gp->player.transform.pitch = 0.0f;
+            gp->player.vel_x = 0.0f;
+            gp->player.vel_z = 0.0f;
+        }
+        for (int i = 0; i < 180; i++) {
+            grave_input_reset(&tape);
+            tape.move_x = sinf((float)i * 0.11f);
+            tape.move_y = cosf((float)i * 0.07f);
+            tape.look_x = sinf((float)i * 0.23f) * 0.2f;
+            tape.look_y = cosf((float)i * 0.17f) * 0.1f;
+            tape.gyro_yaw = sinf((float)i * 0.31f) * 0.8f;
+            tape.gyro_pitch = cosf((float)i * 0.19f) * 0.4f;
+            tape.aim = (i % 50) < 25;
+            grave_game_step(&a, &tape, TEST_DT);
+            grave_game_step(&b, &tape, TEST_DT);
+        }
+        CHECK(hash_game(&a) == hash_game(&b));
+        CHECK(finite_f32(a.player.transform.pos.x) &&
+              finite_f32(a.player.transform.pos.z));
+    }
+}
+
+static void test_aiming(void)
+{
+    GraveGame g;
+    GraveInput in;
+    float hip_dist;
+    float aim_dist;
+    float recoil_hip;
+    float recoil_aim;
+
+    /* aiming slows the walk to 0.55x */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.move_y = 1.0f;
+    for (int i = 0; i < 60; i++)
+        step_with(&g, &in);
+    hip_dist = g.player.transform.pos.z;
+    CHECK(hip_dist > 3.2f);
+
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.move_y = 1.0f;
+    in.aim = true;
+    for (int i = 0; i < 60; i++)
+        step_with(&g, &in);
+    aim_dist = g.player.transform.pos.z;
+    CHECK(aim_dist > 1.8f && aim_dist < 2.5f);
+    CHECK(aim_dist < hip_dist * 0.7f);
+    CHECK(g.player.aiming);
+
+    /* sprint is disabled while aiming (speed capped at the aim walk) */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.move_y = 1.0f;
+    in.aim = true;
+    in.sprint = true;
+    for (int i = 0; i < 60; i++)
+        step_with(&g, &in);
+    CHECK(g.player.transform.pos.z < 2.5f);
+
+    /* camera: scoped FOV 50 and a closer third-person camera while aiming */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    grave_input_reset(&in);
+    in.aim = true;
+    step_with(&g, &in);
+    grave_update_camera(&g, 400.0f / 240.0f);
+    CHECK_NEAR(g.camera_fov, GRAVE_AIM_FOV, 0.001f, "aim TP fov");
+    CHECK_NEAR(g.camera_pos.z, -GRAVE_AIM_TP_DISTANCE, 0.02f, "aim TP distance");
+    CHECK_NEAR(g.camera_pos.y, GRAVE_PLAYER_CAM_PIVOT_Y, 0.001f, "aim TP height");
+    g.player.camera_first_person = true;
+    grave_update_camera(&g, 400.0f / 240.0f);
+    CHECK_NEAR(g.camera_fov, GRAVE_AIM_FOV, 0.001f, "aim FP fov");
+
+    /* recoil kick is softened by 30% while aiming */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    set_weapon(&g, WEAPON_MUSKET);
+    fire_once(&g);
+    recoil_hip = g.player.recoil;
+    /* the same step already applies recoil recovery: kick * (1 - dt*rate) */
+    CHECK_NEAR(recoil_hip,
+               2.0f * GRAVE_DEG2RAD * (1.0f - TEST_DT * GRAVE_RECOIL_RECOVERY),
+               0.001f, "hip recoil");
+
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    set_weapon(&g, WEAPON_MUSKET);
+    grave_input_reset(&in);
+    in.aim = true;
+    in.fire = true;
+    step_with(&g, &in);
+    recoil_aim = g.player.recoil;
+    CHECK_NEAR(recoil_aim, recoil_hip * GRAVE_AIM_RECOIL_SCALE, 1.0e-4f,
+               "aim recoil is 70% of hip recoil");
+    CHECK(recoil_aim < recoil_hip);
+
+    /* tighter spread: aimed long-range shots land more often than hip fire */
+    {
+        int hip_hits = 0;
+        int aim_hits = 0;
+        for (int trial = 0; trial < 16; trial++) {
+            quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+            clear_props(&g);
+            g.rng = 1000u + (uint32_t)trial; /* same spread stream both modes */
+            place_zombie(&g, 0, ZOMBIE_SHAMBLER,
+                         vec3_make(0.0f, 0.0f, 20.0f), ZOMBIE_CHASE);
+            g.player.transform.pitch = aim_pitch_at(0.9f, 20.0f);
+            set_weapon(&g, WEAPON_FLINTLOCK);
+            grave_input_reset(&in);
+            in.fire = true;
+            in.aim = false;
+            step_with(&g, &in);
+            if (g.total_hits > 0)
+                hip_hits++;
+        }
+        for (int trial = 0; trial < 16; trial++) {
+            quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+            clear_props(&g);
+            g.rng = 1000u + (uint32_t)trial;
+            place_zombie(&g, 0, ZOMBIE_SHAMBLER,
+                         vec3_make(0.0f, 0.0f, 20.0f), ZOMBIE_CHASE);
+            g.player.transform.pitch = aim_pitch_at(0.9f, 20.0f);
+            set_weapon(&g, WEAPON_FLINTLOCK);
+            grave_input_reset(&in);
+            in.fire = true;
+            in.aim = true;
+            step_with(&g, &in);
+            if (g.total_hits > 0)
+                aim_hits++;
+        }
+        CHECK(aim_hits > hip_hits);
+        CHECK(aim_hits >= 15);
+    }
+
+    /* aim assist: a near-miss hip shot stays a miss... */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    place_zombie(&g, 0, ZOMBIE_SHAMBLER, vec3_make(0.4f, 0.0f, 10.0f), ZOMBIE_CHASE);
+    g.player.transform.pitch = aim_pitch_at(0.9f, 10.0f);
+    set_weapon(&g, WEAPON_MUSKET);
+    clear_events(&g);
+    grave_input_reset(&in);
+    in.fire = true;
+    in.aim = false;
+    step_with(&g, &in);
+    CHECK_NEAR(g.zombies[0].hp, grave_zombie_spec(ZOMBIE_SHAMBLER)->hp, 0.001f,
+               "hip fire near miss stays a miss");
+    CHECK((g.events & GRAVE_EVT_HIT) == 0u);
+
+    /* ...but the same near miss is forgiven while aiming */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    place_zombie(&g, 0, ZOMBIE_SHAMBLER, vec3_make(0.4f, 0.0f, 10.0f), ZOMBIE_CHASE);
+    g.player.transform.pitch = aim_pitch_at(0.9f, 10.0f);
+    set_weapon(&g, WEAPON_MUSKET);
+    clear_events(&g);
+    grave_input_reset(&in);
+    in.fire = true;
+    in.aim = true;
+    step_with(&g, &in);
+    CHECK((g.events & GRAVE_EVT_HIT) != 0u);
+    CHECK(g.total_hits == 1);
+    CHECK(g.zombies[0].hp < grave_zombie_spec(ZOMBIE_SHAMBLER)->hp);
+
+    /* assist respects weapon range */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    place_zombie(&g, 0, ZOMBIE_SHAMBLER, vec3_make(1.2f, 0.0f, 30.0f), ZOMBIE_CHASE);
+    g.player.transform.pitch = aim_pitch_at(0.9f, 30.0f);
+    set_weapon(&g, WEAPON_FLINTLOCK); /* 26 m range */
+    clear_events(&g);
+    grave_input_reset(&in);
+    in.fire = true;
+    in.aim = true;
+    step_with(&g, &in);
+    CHECK((g.events & GRAVE_EVT_HIT) == 0u);
+    CHECK_NEAR(g.zombies[0].hp, grave_zombie_spec(ZOMBIE_SHAMBLER)->hp, 0.001f,
+               "assist beyond weapon range");
+
+    /* assist needs a clear line of fire */
+    quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(&g);
+    add_test_prop(&g, vec3_make(0.2f, 0.0f, 4.0f),
+                  vec3_make(1.0f, 2.0f, 1.0f), PROP_CRATE);
+    place_zombie(&g, 0, ZOMBIE_SHAMBLER, vec3_make(0.4f, 0.0f, 10.0f), ZOMBIE_CHASE);
+    g.player.transform.pitch = aim_pitch_at(0.9f, 10.0f);
+    set_weapon(&g, WEAPON_MUSKET);
+    clear_events(&g);
+    grave_input_reset(&in);
+    in.fire = true;
+    in.aim = true;
+    step_with(&g, &in);
+    CHECK((g.events & GRAVE_EVT_HIT) == 0u);
+    CHECK_NEAR(g.zombies[0].hp, grave_zombie_spec(ZOMBIE_SHAMBLER)->hp, 0.001f,
+               "assist blocked by prop");
+}
+
+/* Rewrites the FNV checksum of a SaveData image (mirrors game.c) so tests can
+ * hand-craft "old" or invalid reserved bytes. */
+static void test_recompute_save_checksum(uint8_t *buf)
+{
+    SaveData sd;
+    const unsigned char *bytes;
+    uint32_t hash = 2166136261u;
+    size_t i;
+
+    memcpy(&sd, buf, sizeof(sd));
+    bytes = (const unsigned char *)&sd;
+    for (i = offsetof(SaveData, unlocked_mask); i < sizeof(SaveData); i++) {
+        hash ^= (uint32_t)bytes[i];
+        hash *= 16777619u;
+    }
+    sd.checksum = hash;
+    memcpy(buf, &sd, sizeof(sd));
+}
+
+static void test_gyro_settings(void)
+{
+    GraveGame g;
+    uint8_t buf[GRAVE_SAVE_SIZE];
+    SaveData sd;
+    GraveSettings settings;
+    GraveSettings loaded;
+
+    CHECK(GRAVE_SAVE_VERSION == 3u);
+    CHECK(GRAVE_SAVE_SIZE == 108);
+    CHECK(GRAVE_GYRO_ON == 0);
+    CHECK(GRAVE_GYRO_OFF == 1);
+    CHECK(GRAVE_GYRO_INVERT == 2);
+    CHECK(GRAVE_GYRO_SENS_MED == 0);
+    CHECK(GRAVE_GYRO_SENS_LOW == 1);
+    CHECK(GRAVE_GYRO_SENS_HIGH == 2);
+
+    grave_game_init(&g, 7u);
+    memset(&settings, 0, sizeof(settings));
+    settings.touch_sens = 1;
+    settings.gyro_mode = (uint8_t)GRAVE_GYRO_INVERT;
+    settings.gyro_sens = (uint8_t)GRAVE_GYRO_SENS_LOW;
+
+    CHECK(grave_save_to_buffer(&g, &settings, buf, sizeof(buf)) == GRAVE_SAVE_SIZE);
+    memcpy(&sd, buf, sizeof(sd));
+    CHECK(sd.version == 3u); /* save version/size deliberately unchanged */
+    CHECK(sd.bytes == (uint16_t)GRAVE_SAVE_SIZE);
+    CHECK(sd.reserved[0] == 2u);
+    CHECK(sd.reserved[1] == 1u);
+
+    memset(&loaded, 0xFF, sizeof(loaded));
+    CHECK(grave_load_from_buffer(&g, &loaded, buf, sizeof(buf)));
+    CHECK(loaded.gyro_mode == (uint8_t)GRAVE_GYRO_INVERT);
+    CHECK(loaded.gyro_sens == (uint8_t)GRAVE_GYRO_SENS_LOW);
+    CHECK(loaded.touch_sens == 1);
+
+    /* a pre-v0.4 image (zeroed reserved bytes) loads as ON / MED */
+    memcpy(&sd, buf, sizeof(sd));
+    sd.reserved[0] = 0u;
+    sd.reserved[1] = 0u;
+    memcpy(buf, &sd, sizeof(sd));
+    test_recompute_save_checksum(buf);
+    CHECK(grave_load_from_buffer(&g, &loaded, buf, sizeof(buf)));
+    CHECK(loaded.gyro_mode == (uint8_t)GRAVE_GYRO_ON);
+    CHECK(loaded.gyro_sens == (uint8_t)GRAVE_GYRO_SENS_MED);
+
+    /* junk reserved values sanitise to the defaults, not random modes */
+    memcpy(&sd, buf, sizeof(sd));
+    sd.reserved[0] = 9u;
+    sd.reserved[1] = 7u;
+    memcpy(buf, &sd, sizeof(sd));
+    test_recompute_save_checksum(buf);
+    CHECK(grave_load_from_buffer(&g, &loaded, buf, sizeof(buf)));
+    CHECK(loaded.gyro_mode == (uint8_t)GRAVE_GYRO_ON);
+    CHECK(loaded.gyro_sens == (uint8_t)GRAVE_GYRO_SENS_MED);
+
+    /* NULL settings stay optional */
+    CHECK(grave_save_to_buffer(&g, NULL, buf, sizeof(buf)) == GRAVE_SAVE_SIZE);
+    CHECK(grave_load_from_buffer(&g, NULL, buf, sizeof(buf)));
+}
+
+/* ================================================================== */
 /* save data (v0.2)                                                    */
 /* ================================================================== */
 
@@ -2473,7 +2888,8 @@ static void test_camera(void)
     grave_update_camera(&g, 400.0f / 240.0f);
     CHECK_NEAR(g.camera_fov, GRAVE_CAM_FOV_TP, 0.001f, "third person fov");
     CHECK_NEAR(g.camera_pos.y, GRAVE_PLAYER_CAM_PIVOT_Y, 0.001f, "tp height");
-    CHECK_NEAR(g.camera_pos.x, GRAVE_CAM_TP_SHOULDER, 0.001f, "tp shoulder");
+    CHECK_NEAR(g.camera_pos.x, -GRAVE_CAM_TP_SHOULDER, 0.001f,
+               "tp shoulder shifts screen-right (-x at yaw 0)");
     CHECK_NEAR(g.camera_pos.z, -GRAVE_CAM_TP_DISTANCE, 0.001f, "tp distance");
     CHECK_NEAR(g.camera_look.y, GRAVE_PLAYER_CAM_PIVOT_Y, 0.001f, "tp look height");
     view.x = g.camera_look.x - g.camera_pos.x;
@@ -2837,6 +3253,16 @@ static int stress_invariant_violations(const GraveGame *g)
             bad++;
         if (g->player.reload_timer < -0.001f || g->player.reload_duration < 0.0f)
             bad++;
+        /* v0.4: aim velocity state stays finite and bounded by sprint speed */
+        if (!finite_f32(g->player.vel_x) || !finite_f32(g->player.vel_z))
+            bad++;
+        if (g->player.vel_x * g->player.vel_x +
+                g->player.vel_z * g->player.vel_z >
+            (GRAVE_PLAYER_SPRINT_SPEED * 1.1f) * (GRAVE_PLAYER_SPRINT_SPEED * 1.1f))
+            bad++;
+        if (!finite_f32(g->player.transform.pitch) ||
+            fabsf(g->player.transform.pitch) > GRAVE_PITCH_LIMIT + 0.001f)
+            bad++;
         if (g->boss_alive != 0 && g->boss_alive != 1)
             bad++;
         if (!finite_f32(g->boss_hp) || !finite_f32(g->boss_max_hp))
@@ -2949,6 +3375,9 @@ int main(void)
     printf("  old mine + boss ... "); test_mine_zone();       printf("done\n");
     printf("  shop ... ");            test_shop();            printf("done\n");
     printf("  accuracy ... ");        test_accuracy();        printf("done\n");
+    printf("  axis + gyro ... ");     test_axis_and_gyro();   printf("done\n");
+    printf("  aiming ... ");          test_aiming();          printf("done\n");
+    printf("  gyro settings ... ");   test_gyro_settings();   printf("done\n");
     printf("  save data ... ");       test_save();            printf("done\n");
     printf("  camera ... ");          test_camera();          printf("done\n");
     printf("  phases ... ");          test_phases();          printf("done\n");

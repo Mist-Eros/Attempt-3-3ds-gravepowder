@@ -45,7 +45,10 @@ static float clampf(float v, float lo, float hi)
     return v;
 }
 
-/* yaw 0 = +z, positive yaw turns right (towards +x); pitch positive looks up */
+/* yaw 0 = +z; positive yaw rotates the aim direction towards +x, which is
+ * screen-LEFT with the renderer's basis (Lead's diagnosis: screen-right is
+ * fwd x up = (-cos yaw, 0, sin yaw)).  All "on screen" input signs below are
+ * documented against that basis. */
 static Vec3 aim_dir(float yaw, float pitch)
 {
     float cp = cosf(pitch);
@@ -57,9 +60,10 @@ static Vec3 flat_forward(float yaw)
     return vec3_make(sinf(yaw), 0.0f, cosf(yaw));
 }
 
+/* Screen-right for the renderer camera: fwd x up (v0.4 axis fix). */
 static Vec3 flat_right(float yaw)
 {
-    return vec3_make(cosf(yaw), 0.0f, -sinf(yaw));
+    return vec3_make(-cosf(yaw), 0.0f, sinf(yaw));
 }
 
 static float dist_xz(Vec3 a, Vec3 b)
@@ -695,13 +699,24 @@ static void update_pickups(GraveGame *game, float dt)
 /* player                                                              */
 /* ================================================================== */
 
-static void player_look(GraveGame *game, const GraveInput *input)
+static void player_look(GraveGame *game, const GraveInput *input, float dt)
 {
     Player *p = &game->player;
     float look_x = clampf(input->look_x, -1.0f, 1.0f);
     float look_y = clampf(input->look_y, -1.0f, 1.0f);
-    p->transform.yaw = grave_wrap_pi(p->transform.yaw + look_x * GRAVE_LOOK_YAW_PER_UNIT);
-    p->transform.pitch = clampf(p->transform.pitch - look_y * GRAVE_LOOK_PITCH_PER_UNIT,
+    float gyro_yaw = input->gyro_yaw;
+    float gyro_pitch = input->gyro_pitch;
+
+    /* Screen conventions (v0.4 axis fix): screen-right is fwd x up, so with
+     * yaw increasing towards +x (screen-left), positive look_x / gyro_yaw
+     * (turn right on screen) must DECREASE yaw.  look_y positive = drag down =
+     * look down; gyro_pitch positive = look up. */
+    p->transform.yaw = grave_wrap_pi(p->transform.yaw
+                                     - look_x * GRAVE_LOOK_YAW_PER_UNIT
+                                     - gyro_yaw * dt);
+    p->transform.pitch = clampf(p->transform.pitch
+                                    - look_y * GRAVE_LOOK_PITCH_PER_UNIT
+                                    + gyro_pitch * dt,
                                 -GRAVE_PITCH_LIMIT, GRAVE_PITCH_LIMIT);
 }
 
@@ -711,37 +726,83 @@ static void player_move(GraveGame *game, const GraveInput *input, float dt)
     float mx = clampf(input->move_x, -1.0f, 1.0f);
     float my = clampf(input->move_y, -1.0f, 1.0f);
     Vec3 fwd = flat_forward(p->transform.yaw);
-    Vec3 right = flat_right(p->transform.yaw);
+    Vec3 right = flat_right(p->transform.yaw); /* screen-right */
     float wish_x = fwd.x * my + right.x * mx;
     float wish_z = fwd.z * my + right.z * mx;
     float wish_len = sqrtf(wish_x * wish_x + wish_z * wish_z);
     bool moving = wish_len > 0.001f;
-    bool sprint = input->sprint && moving && p->stamina > GRAVE_STAMINA_SPRINT_MIN;
-    float speed;
+    bool sprint =
+        input->sprint && moving && !p->aiming && p->stamina > GRAVE_STAMINA_SPRINT_MIN;
+    float target_speed;
+    float target_x;
+    float target_z;
+    float target_len_sq;
+    float cur_len_sq;
+    float dvx;
+    float dvz;
+    float dlen;
+    float max_dv;
+    float accel;
+    float old_x;
+    float old_z;
 
     if (wish_len > 1.0f) {
         wish_x /= wish_len;
         wish_z /= wish_len;
     }
-    speed = sprint ? GRAVE_PLAYER_SPRINT_SPEED : GRAVE_PLAYER_WALK_SPEED;
+    target_speed = sprint ? GRAVE_PLAYER_SPRINT_SPEED : GRAVE_PLAYER_WALK_SPEED;
+    if (p->aiming)
+        target_speed *= GRAVE_AIM_MOVE_SCALE; /* aiming caps the walk, no sprint */
+    target_x = wish_x * target_speed;
+    target_z = wish_z * target_speed;
 
     if (sprint)
         p->stamina = clampf(p->stamina - GRAVE_STAMINA_DRAIN * dt, 0.0f, GRAVE_STAMINA_MAX);
     else
         p->stamina = clampf(p->stamina + GRAVE_STAMINA_REGEN * dt, 0.0f, GRAVE_STAMINA_MAX);
 
+    /* approach the wish velocity instead of snapping to it (v0.4 feel pass) */
+    target_len_sq = target_x * target_x + target_z * target_z;
+    cur_len_sq = p->vel_x * p->vel_x + p->vel_z * p->vel_z;
+    accel = (target_len_sq >= cur_len_sq) ? GRAVE_MOVE_ACCEL : GRAVE_MOVE_DECEL;
+    dvx = target_x - p->vel_x;
+    dvz = target_z - p->vel_z;
+    dlen = sqrtf(dvx * dvx + dvz * dvz);
+    max_dv = accel * dt;
+    if (dlen > max_dv && dlen > 1.0e-6f) {
+        float scale = max_dv / dlen;
+        dvx *= scale;
+        dvz *= scale;
+    }
+    p->vel_x += dvx;
+    p->vel_z += dvz;
+    if (!moving && fabsf(p->vel_x) < 0.01f)
+        p->vel_x = 0.0f;
+    if (!moving && fabsf(p->vel_z) < 0.01f)
+        p->vel_z = 0.0f;
+
+    old_x = p->transform.pos.x;
+    old_z = p->transform.pos.z;
     {
-        float nx = p->transform.pos.x + wish_x * speed * dt;
-        float nz = p->transform.pos.z + wish_z * speed * dt;
+        float nx = old_x + p->vel_x * dt;
+        float nz = old_z + p->vel_z * dt;
         resolve_world(game, &nx, &nz, GRAVE_PLAYER_RADIUS);
         p->transform.pos.x = nx;
         p->transform.pos.z = nz;
+        /* velocity follows the resolved motion so walls do not wind it up */
+        p->vel_x = (nx - old_x) / dt;
+        p->vel_z = (nz - old_z) / dt;
     }
     p->transform.pos.y = 0.0f;
     p->velocity_y = 0.0f;
     p->on_ground = true;
 
-    p->anim_speed = moving ? (sprint ? 1.35f : 1.0f) : 0.0f;
+    {
+        float speed = sqrtf(p->vel_x * p->vel_x + p->vel_z * p->vel_z);
+        p->anim_speed = (moving && speed > 0.05f)
+                            ? clampf(speed / GRAVE_PLAYER_WALK_SPEED, 0.0f, 1.4f)
+                            : 0.0f;
+    }
     p->anim_time += dt * GRAVE_ANIM_WALK_RATE * p->anim_speed;
     if (p->anim_time > 1000.0f)
         p->anim_time -= 1000.0f;
@@ -909,6 +970,71 @@ static void hitscan(GraveGame *game, Vec3 origin, Vec3 dir, float range, ShotRes
     out->headshot = best_head;
 }
 
+/* Aim assist (v0.4): a held-aim shot that missed gets one forgiving cone test
+ * against the nearest zombie inside GRAVE_AIM_ASSIST_RAD of the aim ray, with
+ * a clear line of fire and inside weapon range.  Hip-fire never assists. */
+static bool aim_assist(GraveGame *game, Vec3 origin, Vec3 dir, float range,
+                       ShotResult *shot)
+{
+    int best = -1;
+    float best_dist = range;
+    float min_dot = cosf(GRAVE_AIM_ASSIST_RAD);
+
+    for (int i = 0; i < MAX_ZOMBIES; i++) {
+        const Zombie *z = &game->zombies[i];
+        const ZombieSpec *spec;
+        Vec3 to;
+        float dist;
+        float dot;
+        bool blocked = false;
+
+        if (!z->active || z->state == ZOMBIE_DYING || z->state == ZOMBIE_DEAD)
+            continue;
+        spec = grave_zombie_spec(z->type);
+        to.x = z->pos.x - origin.x;
+        to.y = (z->pos.y + spec->body_height * 0.55f) - origin.y;
+        to.z = z->pos.z - origin.z;
+        dist = sqrtf(to.x * to.x + to.y * to.y + to.z * to.z);
+        if (dist < 1.0e-4f || dist > range)
+            continue;
+        dot = (to.x * dir.x + to.y * dir.y + to.z * dir.z) / dist;
+        if (dot < min_dot)
+            continue;
+        {
+            Vec3 ray;
+            ray.x = to.x / dist;
+            ray.y = to.y / dist;
+            ray.z = to.z / dist;
+            for (int k = 0; k < game->prop_count; k++) {
+                Vec3 mn, mx;
+                float t;
+                prop_aabb(&game->props[k], &mn, &mx);
+                if (ray_aabb(origin, ray, dist, mn, mx, &t)) {
+                    blocked = true;
+                    break;
+                }
+            }
+        }
+        if (blocked)
+            continue;
+        if (dist < best_dist) {
+            best_dist = dist;
+            best = i;
+        }
+    }
+
+    if (best < 0)
+        return false;
+    shot->hit_zombie = true;
+    shot->zombie_index = best;
+    shot->headshot = false;
+    shot->hit_world = false;
+    shot->end.x = origin.x + dir.x * best_dist;
+    shot->end.y = origin.y + dir.y * best_dist;
+    shot->end.z = origin.z + dir.z * best_dist;
+    return true;
+}
+
 static void fire_weapon(GraveGame *game)
 {
     Player *p = &game->player;
@@ -917,6 +1043,8 @@ static void fire_weapon(GraveGame *game)
     /* the kick from *this* shot must not move this shot's aim; the player
      * carries it into the next one */
     float aim_recoil = p->recoil;
+    float spread = spec->spread * (p->aiming ? GRAVE_AIM_SPREAD_SCALE : 1.0f);
+    float kick = spec->recoil * (p->aiming ? GRAVE_AIM_RECOIL_SCALE : 1.0f);
 
     p->ammo[p->weapon] -= 1;
     p->fire_cooldown = spec->fire_interval;
@@ -927,10 +1055,10 @@ static void fire_weapon(GraveGame *game)
     for (int pellet = 0; pellet < pellets; pellet++) {
         ShotResult shot;
         Vec3 origin = p->transform.pos;
-        float yaw = p->transform.yaw + rng_sym(game) * spec->spread;
+        float yaw = p->transform.yaw + rng_sym(game) * spread;
         float pitch = clampf(p->transform.pitch
                                  + aim_recoil * GRAVE_RECOIL_AIM_SHARE
-                                 + rng_sym(game) * spec->spread,
+                                 + rng_sym(game) * spread,
                              -1.55f, 1.55f);
         Vec3 dir = aim_dir(yaw, pitch);
 
@@ -941,6 +1069,8 @@ static void fire_weapon(GraveGame *game)
         origin.z += dir.z * GRAVE_MUZZLE_OFFSET;
 
         hitscan(game, origin, dir, spec->range, &shot);
+        if (!shot.hit_zombie && p->aiming)
+            (void)aim_assist(game, origin, dir, spec->range, &shot);
 
         push_trace(game, origin, shot.end, GRAVE_TRACER_LIFE, GRAVE_TRACER_KIND);
         if (shot.hit_zombie) {
@@ -958,7 +1088,7 @@ static void fire_weapon(GraveGame *game)
         }
     }
 
-    p->recoil = clampf(p->recoil + spec->recoil * GRAVE_DEG2RAD, -0.5f, 0.5f);
+    p->recoil = clampf(p->recoil + kick * GRAVE_DEG2RAD, -0.5f, 0.5f);
 
     if (p->ammo[p->weapon] <= 0)
         weapon_start_reload(game);
@@ -1723,7 +1853,8 @@ void grave_game_step(GraveGame *game, const GraveInput *input, float dt)
     game->zone_time += dt;
     game->total_time += dt;
 
-    player_look(game, input);
+    p->aiming = input->aim;
+    player_look(game, input, dt);
     if (input->toggle_camera)
         p->camera_first_person = !p->camera_first_person;
 
@@ -1776,14 +1907,14 @@ void grave_update_camera(GraveGame *game, float aspect)
         game->camera_look = vec3_make(eye.x + fwd.x * 10.0f,
                                       eye.y + fwd.y * 10.0f,
                                       eye.z + fwd.z * 10.0f);
-        game->camera_fov = GRAVE_CAM_FOV_FP;
+        game->camera_fov = p->aiming ? GRAVE_AIM_FOV : GRAVE_CAM_FOV_FP;
         return;
     }
 
     {
         Vec3 pivot;
         Vec3 cam;
-        float distance = GRAVE_CAM_TP_DISTANCE;
+        float distance = p->aiming ? GRAVE_AIM_TP_DISTANCE : GRAVE_CAM_TP_DISTANCE;
         const ZoneSpec *zs = grave_zone_spec(game->zone);
 
         pivot = p->transform.pos;
@@ -1818,7 +1949,7 @@ void grave_update_camera(GraveGame *game, float aspect)
         game->camera_look = vec3_make(pivot.x + fwd.x * 12.0f,
                                       pivot.y + fwd.y * 12.0f,
                                       pivot.z + fwd.z * 12.0f);
-        game->camera_fov = GRAVE_CAM_FOV_TP;
+        game->camera_fov = p->aiming ? GRAVE_AIM_FOV : GRAVE_CAM_FOV_TP;
     }
 }
 
@@ -1998,6 +2129,12 @@ int grave_save_to_buffer(const GraveGame *game, const GraveSettings *settings,
         sd.invert_y = settings->invert_y ? 1u : 0u;
         sd.touch_sens = settings->touch_sens;
         sd.muted = settings->muted ? 1u : 0u;
+        /* v0.4 gyro settings live inside SaveData.reserved[0..1] so the save
+         * version/layout stay unchanged (old images = ON / MED defaults). */
+        sd.reserved[0] = settings->gyro_mode <= (uint8_t)GRAVE_GYRO_INVERT
+                             ? settings->gyro_mode : (uint8_t)GRAVE_GYRO_ON;
+        sd.reserved[1] = settings->gyro_sens <= (uint8_t)GRAVE_GYRO_SENS_HIGH
+                             ? settings->gyro_sens : (uint8_t)GRAVE_GYRO_SENS_MED;
     }
 
     for (int i = 0; i < WEAPON_COUNT; i++) {
@@ -2121,6 +2258,12 @@ bool grave_load_from_buffer(GraveGame *game, GraveSettings *settings_out,
         settings_out->invert_y = sd.invert_y ? 1u : 0u;
         settings_out->touch_sens = sd.touch_sens;
         settings_out->muted = sd.muted ? 1u : 0u;
+        /* v0.4: gyro settings ride in SaveData.reserved; sanitise junk.
+         * A pre-v0.4 image has zeroed reserved -> ON / MED defaults. */
+        settings_out->gyro_mode = sd.reserved[0] <= (uint8_t)GRAVE_GYRO_INVERT
+                                      ? sd.reserved[0] : (uint8_t)GRAVE_GYRO_ON;
+        settings_out->gyro_sens = sd.reserved[1] <= (uint8_t)GRAVE_GYRO_SENS_HIGH
+                                      ? sd.reserved[1] : (uint8_t)GRAVE_GYRO_SENS_MED;
     }
 
     /* ---- apply ---- */
@@ -2205,6 +2348,9 @@ bool grave_load_from_buffer(GraveGame *game, GraveSettings *settings_out,
     game->player.anim_speed = 0.0f;
     game->player.firing = false;
     game->player.muzzle_flash = 0.0f;
+    game->player.aiming = false;
+    game->player.vel_x = 0.0f;
+    game->player.vel_z = 0.0f;
 
     game->phase = GAME_PHASE_TITLE;
     game->zone = world.current;

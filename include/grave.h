@@ -59,6 +59,14 @@ typedef struct {
     bool  toggle_camera; /* tap: first <-> third person               */
     bool  pause;         /* tap: start / touch pause button           */
     bool  interact;      /* tap: use / pick up                        */
+
+    /* v0.4 (append-only): aim / gyro.
+     * aim is held; gyro rates are rad/s supplied by the app's motion read.
+     * gyro_yaw:  positive = turn right on screen.
+     * gyro_pitch: positive = look up. */
+    bool  aim;
+    float gyro_yaw;
+    float gyro_pitch;
 } GraveInput;
 
 /* ------------------------------------------------------------------ */
@@ -259,6 +267,12 @@ typedef struct {
     int     vitality_level;            /* +10 max hp per level (max 5)      */
     int     reload_tune;               /* -8% reload time per level (max 3) */
     float   reload_duration;           /* effective seconds of current reload */
+
+    /* v0.4 (append-only): aiming + horizontal velocity state for the
+     * acceleration model (the core integrates it; UI can ignore). */
+    bool    aiming;                    /* held aim, set from GraveInput.aim  */
+    float   vel_x;                     /* current horizontal velocity, m/s   */
+    float   vel_z;
 } Player;
 
 /* ------------------------------------------------------------------ */
@@ -474,12 +488,18 @@ typedef struct {
 } SaveData;
 
 /* Front-end settings that the core does not simulate but should persist.  All
- * fields are optional; pass NULL to save/load without them. */
+ * fields are optional; pass NULL to save/load without them.
+ *
+ * v0.4 (append-only): gyro settings.  They are stored inside SaveData.reserved
+ * so the save format version/size are unchanged; a pre-v0.4 (zeroed reserved)
+ * image loads as ON / MED. */
 typedef struct {
     uint8_t invert_y;
     uint8_t touch_sens;
     uint8_t muted;
     uint8_t reserved;
+    uint8_t gyro_mode;   /* GraveGyroMode: 0 ON (default), 1 OFF, 2 INVERT */
+    uint8_t gyro_sens;   /* GraveGyroSens: 0 MED (default), 1 LOW, 2 HIGH */
 } GraveSettings;
 
 /* sizeof(SaveData); also the exact number of bytes grave_save_to_buffer
@@ -568,5 +588,27 @@ bool grave_shop_can_buy(const GraveGame *game, ShopItem item);
 /* Buys + applies the item.  Returns false and changes nothing if
  * grave_shop_can_buy is false. */
 bool grave_shop_buy(GraveGame *game, ShopItem item);
+
+/* ================================================================== */
+/* v0.4: aiming / gyro settings (append-only)                         */
+/* ================================================================== */
+
+/* Gyro mode stored in GraveSettings.gyro_mode (0 = ON is the default). */
+typedef enum {
+    GRAVE_GYRO_ON = 0,      /* gyro turn enabled (default)               */
+    GRAVE_GYRO_OFF = 1,     /* ignore gyro rates                          */
+    GRAVE_GYRO_INVERT = 2,  /* enabled, yaw rate sign flipped             */
+    GRAVE_GYRO_MODE_COUNT
+} GraveGyroMode;
+
+/* Gyro sensitivity step stored in GraveSettings.gyro_sens (0 = MED default).
+ * The app applies the actual multiplier when it converts sensor rates into
+ * GraveInput.gyro_yaw / gyro_pitch; the core always consumes rad/s. */
+typedef enum {
+    GRAVE_GYRO_SENS_MED = 0,
+    GRAVE_GYRO_SENS_LOW = 1,
+    GRAVE_GYRO_SENS_HIGH = 2,
+    GRAVE_GYRO_SENS_COUNT
+} GraveGyroSens;
 
 #endif /* GRAVEPOWDER_H */
