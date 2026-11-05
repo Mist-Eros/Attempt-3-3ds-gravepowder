@@ -75,6 +75,29 @@ void host_input_clear_edges(void)
     host_keys_down = 0;
 }
 
+/* v0.4 motion input: the host harness is a still rig.  Zero angular rates keep
+ * the app's gyro aim path inert (the core consumes GraveInput.gyro_*). */
+static angularRate g_host_gyro_rate;
+
+void HIDUSER_EnableGyroscope(void)
+{
+}
+
+void HIDUSER_DisableGyroscope(void)
+{
+}
+
+float HIDUSER_GetGyroscopeRawToDpsCoefficient(void)
+{
+    return 1.0f;
+}
+
+void hidGyroRead(angularRate *rate)
+{
+    if (rate != NULL)
+        *rate = g_host_gyro_rate;
+}
+
 /* ------------------------------------------------------------------ */
 /* draw-list recorder                                                  */
 /* ------------------------------------------------------------------ */

@@ -36,6 +36,18 @@ typedef struct {
     u16 py;
 } touchPosition;
 
+/* v0.4 motion input (aim).  The host harness is a still rig: gyro rates read
+ * back as zero and Enable/Disable are no-ops, so the app's gyro path stays
+ * harmless and deterministic on the PC. */
+typedef struct {
+    float x, y, z;
+} angularRate;
+
+void HIDUSER_EnableGyroscope(void);
+void HIDUSER_DisableGyroscope(void);
+float HIDUSER_GetGyroscopeRawToDpsCoefficient(void);
+void hidGyroRead(angularRate *rate);
+
 /* Synthetic hid state, filled in by the preview driver. */
 extern u32 host_keys_held;
 extern u32 host_keys_down;
