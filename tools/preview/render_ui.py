@@ -21,6 +21,7 @@ from the v0.2 release, so text metrics and the baseline comparison are advisory
 import argparse
 import glob
 import os
+import re
 import sys
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageStat
@@ -69,6 +70,13 @@ PANEL_PAGES = OVERLAY_PAGES | {"title", "title_save", "zone_clear", "game_over",
                                "ending"}
 
 TAB_LABELS = {"AREA", "WORLD", "PACK", "SHOP"}
+
+# v0.5 readability policy ("Cute & Deadly"): player feedback was that most
+# writing was hard to see.  Non-decorative UI/body text must be at least this
+# citro2d scale; smaller text is reported as a readability warning (advisory,
+# it does not by itself fail the layout gate).
+MIN_READABLE_SCALE = 0.335
+DECORATIVE_TEXTS = {"3DS HOMEBREW", "GRAVEPOWDER"}
 STRIP_H = 33.0     # ui.c: STRIP_H
 TAB_Y = 36.0       # ui.c: TAB_Y
 TAB_H = 22.0
@@ -301,6 +309,18 @@ def covered_between(draws, first_idx, last_idx, rect, min_alpha=0.45,
 FONT_WIDTH_CORRECTION = 0.92
 
 
+def is_decorative_text(text):
+    """Tiny stamp/credit text is allowed to stay small; labels and body copy are
+    not.  Exceptions: the version stamp (e.g. 'v0.5'), the homebrew credit and
+    single-letter compass/map glyphs."""
+    t = text.strip().upper()
+    if len(t) <= 1:
+        return True
+    if t in DECORATIVE_TEXTS or t in {"N", "S", "E", "W"}:
+        return True
+    return re.match(r"^V\d+\.\d+$", t) is not None
+
+
 def content_panels(draws):
     """Opaque, panel-sized RECTs (sign boards, dialogs, result panels).
     Full-screen clear/dim rects are excluded."""
@@ -321,9 +341,11 @@ def content_panels(draws):
 
 
 def overlay_content_start(page, draws):
-    """Index of the last full-screen dim rect on overlay pages: text drawn after
-    it is overlay content, text before it belongs to the dimmed page underneath
-    (covered by the panel, so it must not be panel- or collision-checked)."""
+    """Index of the last dim rect on overlay pages: text drawn after it is
+    overlay content, text before it belongs to the dimmed page underneath
+    (covered by the panel, so it must not be panel- or collision-checked).
+    The dim may cover only the content area (the v0.5 travel dialog starts
+    below the HUD strip), so accept any large partial-screen dim."""
     if page not in OVERLAY_PAGES:
         return -1
     start = -1
@@ -331,11 +353,34 @@ def overlay_content_start(page, draws):
         if d.kind != "RECT" or d.bbox is None:
             continue
         x0, y0, x1, y1 = d.bbox
-        if (x1 - x0) < 318.0 or (y1 - y0) < 238.0:
+        if (x1 - x0) < 280.0 or (y1 - y0) < 150.0:
             continue
         if 60 <= abgr(d.clr)[3] <= 250:
             start = max(start, d.idx)
     return start
+
+
+def occluded_by_later_rect(draws, d, min_fraction=0.5):
+    """True when an opaque rect drawn after the text covers most of it (banner,
+    toast or panel over the page); such text is not visible and its contrast
+    must not be judged against the covering panel."""
+    bx0, by0, bx1, by1 = d.bbox
+    barea = max(1.0, (bx1 - bx0) * (by1 - by0))
+    for r in draws:
+        if r.idx <= d.idx or r.kind != "RECT" or r.bbox is None:
+            continue
+        if abgr(r.clr)[3] < 180:
+            continue
+        rx0, ry0, rx1, ry1 = r.bbox
+        if (rx1 - rx0) >= 318.0 and (ry1 - ry0) >= 238.0:
+            continue  # full-screen clear/dim background
+        ix0, iy0 = max(bx0, rx0), max(by0, ry0)
+        ix1, iy1 = min(bx1, rx1), min(by1, ry1)
+        if ix1 <= ix0 or iy1 <= iy0:
+            continue
+        if (ix1 - ix0) * (iy1 - iy0) / barea >= min_fraction:
+            return True
+    return False
 
 
 def panels_for_text(panels, d):
@@ -362,21 +407,26 @@ def check_page(page, draws, bg_image, warnings):
     issues = []
     contrast_warnings = []
     tight = []
-    is_hud = page in HUD_PAGES
+    is_hud = page in HUD_PAGES or page.startswith("hud_")
     skip_collision = page in OVERLAY_PAGES or page in TRANSITION_PAGES
     skip_contrast = page in OVERLAY_PAGES or page in TRANSITION_PAGES
     skip_bounds = page in TRANSITION_PAGES
     panels = content_panels(draws) if page in PANEL_PAGES else []
-    tolerance = 0.75  # px tolerance for edge-hugging decorations
+    tolerance = 0.75        # px tolerance for edge-hugging text
+    shape_tolerance = 8.0   # decorative shapes may be clipped at the screen
+                            # edge on purpose (the v0.5 mascot peeks up from the
+                            # bottom edge, its base shadow is off-screen)
 
-    def out_of_bounds(bbox):
+    def out_of_bounds(bbox, tol):
         x0, y0, x1, y1 = bbox
-        return (x0 < -tolerance or y0 < -tolerance or
-                x1 > W + tolerance or y1 > H + tolerance)
+        return (x0 < -tol or y0 < -tol or x1 > W + tol or y1 > H + tol)
 
     if not skip_bounds:
         for d in draws:
-            if d.bbox is not None and out_of_bounds(d.bbox):
+            if d.bbox is None:
+                continue
+            tol = tolerance if d.kind == "TEXT" else shape_tolerance
+            if out_of_bounds(d.bbox, tol):
                 issues.append("out of bounds: %s bbox=(%.1f,%.1f,%.1f,%.1f)%s"
                               % (d.kind, d.bbox[0], d.bbox[1], d.bbox[2],
                                  d.bbox[3],
@@ -385,6 +435,23 @@ def check_page(page, draws, bg_image, warnings):
     texts = [d for d in draws if d.kind == "TEXT" and d.text]
     content_start = overlay_content_start(page, draws)
     is_content = {d.idx: d.idx > content_start for d in texts}
+
+    # v0.5 readability: check the core copy of each text (skip outline/shadow
+    # copies), ignoring the tiny decorative version/credit stamps.
+    readability = []
+    for d in texts:
+        em = max(6, int(round(33.0 * d.nums[2])))
+        shadow_tol = max(5.0, em * 0.35)
+        copies = [o for o in texts
+                  if o is not d and o.text == d.text and
+                  abs(o.nums[0] - d.nums[0]) <= shadow_tol and
+                  abs(o.nums[1] - d.nums[1]) <= shadow_tol]
+        if any(o.idx > d.idx for o in copies):
+            continue  # outline/shadow copy, judged via the core copy
+        if d.nums[2] < MIN_READABLE_SCALE and not is_decorative_text(d.text):
+            readability.append("too small (scale %.2f < %.2f): '%s'"
+                               % (d.nums[2], MIN_READABLE_SCALE, d.text[:36]))
+    readability = list(dict.fromkeys(readability))
 
     # Overlay/board pages: every overlay text that sits on a panel must stay
     # inside at least one panel containing its centre (nested border/fill rects
@@ -531,6 +598,8 @@ def check_page(page, draws, bg_image, warnings):
             is_under_copy = any(other.idx > d.idx for other in copies)
             if is_under_copy:
                 continue
+            if occluded_by_later_rect(draws, d):
+                continue  # transient banner/toast/panel covers this text
             bx0, by0, bx1, by1 = d.bbox
             bx0 = int(min(max(bx0, 0), W - 1))
             by0 = int(min(max(by0, 0), H - 1))
@@ -575,7 +644,7 @@ def check_page(page, draws, bg_image, warnings):
         if t not in seen_tight:
             seen_tight.add(t)
             unique_tight.append(t)
-    return unique, contrast_warnings, unique_tight
+    return unique, contrast_warnings, unique_tight, readability
 
 
 def image_mae(diff):
@@ -644,6 +713,7 @@ def main():
     total_issues = 0
     total_contrast = 0
     total_tight = 0
+    total_readability = 0
     total_compares = 0
 
     print("Gravepowder UI preview replay (%d page draw list(s))" % len(drawlists))
@@ -654,10 +724,12 @@ def main():
         png_path = os.path.join(outdir, page + "_bottom.png")
         rendered = render(draws, png_path, include_text=True, save=True)
         bg_image = render(draws, png_path, include_text=False, save=False)
-        issues, contrast_warnings, tight = check_page(page, draws, bg_image, warnings)
+        issues, contrast_warnings, tight, readability = check_page(
+            page, draws, bg_image, warnings)
         total_issues += len(issues)
         total_contrast += len(contrast_warnings)
         total_tight += len(tight)
+        total_readability += len(readability)
 
         n_text = sum(1 for d in draws if d.kind == "TEXT")
         print("\n[page] %-18s %3d primitives  %2d text  -> %s"
@@ -667,6 +739,13 @@ def main():
                 print("  [layout] " + issue)
         else:
             print("  [layout] OK (bounds, band boundaries, panels, collisions)")
+        if readability:
+            print("  [read] %d too-small text(s) (policy scale >= %.2f)"
+                  % (len(readability), MIN_READABLE_SCALE))
+            for r in readability[:8]:
+                print("    " + r)
+            if len(readability) > 8:
+                print("    ... %d more" % (len(readability) - 8))
         if tight:
             print("  [tight] %d near-panel-width text(s)" % len(tight))
             for t in tight[:6]:
@@ -679,7 +758,7 @@ def main():
                 print("    " + cw)
             if len(contrast_warnings) > 6:
                 print("    ... %d more" % (len(contrast_warnings) - 6))
-        report.append((page, issues, contrast_warnings, tight))
+        report.append((page, issues, contrast_warnings, tight, readability))
 
         if not args.no_compare:
             for result in compare_baseline(page, rendered, baselines, outdir):
@@ -701,24 +780,27 @@ def main():
             print("\n[compare] %s skipped: %s" % (name, note))
 
     print("\nrender_ui: %d page(s), %d layout issue(s), %d contrast warning(s), "
-          "%d tight text(s), %d baseline comparison(s)"
+          "%d tight text(s), %d readability warning(s), %d baseline comparison(s)"
           % (len(report), total_issues, total_contrast, total_tight,
-             total_compares))
+             total_readability, total_compares))
     print("          mockups: %s/<page>_bottom.png (+ _2x.png; diff_*.png for compares)"
           % rel(outdir))
 
     report_path = os.path.join(outdir, "check_report.txt")
     with open(report_path, "w", encoding="utf-8") as f:
-        for page, issues, cws, tight in report:
+        for page, issues, cws, tight, readability in report:
             f.write("[page] %s\n" % page)
             for issue in issues:
                 f.write("  [layout] %s\n" % issue)
+            for r in readability:
+                f.write("  [read] %s\n" % r)
             for t in tight:
                 f.write("  [tight] %s\n" % t)
             for cw in cws:
                 f.write("  [contrast] %s\n" % cw)
-        f.write("\nlayout issues: %d, contrast warnings: %d, tight texts: %d\n"
-                % (total_issues, total_contrast, total_tight))
+        f.write("\nlayout issues: %d, contrast warnings: %d, tight texts: %d, "
+                "readability warnings: %d\n"
+                % (total_issues, total_contrast, total_tight, total_readability))
     print("          report:  %s" % rel(report_path))
     return 0 if total_issues == 0 else 1
 

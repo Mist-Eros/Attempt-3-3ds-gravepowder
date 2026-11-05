@@ -136,12 +136,17 @@ static void expect_tab(AppTab tab, const char *what)
     }
 }
 
-/* Capture the bottom screen draw list for the current app state. */
-static void capture(const char *name)
+/* Capture the bottom screen draw list for the current app state.
+ * Transient "juice" (the touch press ring) is cleared by default so page
+ * snapshots stay clean and reproducible; capture_fx() keeps it for the
+ * explicit hud_press capture. */
+static void capture_impl(const char *name, int keep_fx)
 {
     char path[512];
     int rc;
 
+    if (!keep_fx)
+        g->press_timer = 0.0f;
     host_drawlist_begin();
     app_draw_bottom();
     snprintf(path, sizeof(path), "%s/%s.txt", g_outdir, name);
@@ -157,6 +162,16 @@ static void capture(const char *name)
     if (host_text_overflow > 0)
         ++g_failures;
     ++g_captures;
+}
+
+static void capture(const char *name)
+{
+    capture_impl(name, 0);
+}
+
+static void capture_fx(const char *name)
+{
+    capture_impl(name, 1);
 }
 
 static void boot(void)
@@ -299,6 +314,15 @@ static void rep_run_state(void)
     g->toast_timer = 0.0f;
     g->wardrobe_flash = 0.0f;
     g->save_erase_armed = false;
+    /* v0.5 juice/overlay state: page captures default to the idle mascot with
+     * no banner and no press-ring; specific captures set these afterwards. */
+    g->mascot_mood = APP_MASCOT_IDLE;
+    g->mascot_timer = 0.0f;
+    g->press_timer = 0.0f;
+    g->press_x = 0.0f;
+    g->press_y = 0.0f;
+    g->banner_timer = 0.0f;
+    g->banner[0] = '\0';
 }
 
 /* Full Ashen Mill fixture used by the v0.2-era pages: also fixes the quest. */
@@ -376,6 +400,37 @@ static void tour_hud_pages(void)
     g->hit_flash = 0.85f;
     g->prev_hp = 16.0f;
     capture("hud_low_hp");
+
+    /* v0.5: mascot moods, event banner and touch-press ring (captured on the
+     * default AREA tab so the mascot overlay is shown against the dense page). */
+    tap_rect(ui_tab_rect(APP_TAB_AREA));
+    settle(12);
+    rep_state();
+    g->mascot_mood = APP_MASCOT_HAPPY;
+    g->mascot_timer = 2.0f;
+    capture("hud_mascot_happy");
+
+    rep_state();
+    g->mascot_mood = APP_MASCOT_WORRIED;
+    g->mascot_timer = 2.0f;
+    capture("hud_mascot_worried");
+
+    rep_state();
+    g->mascot_mood = APP_MASCOT_PALE;
+    g->mascot_timer = 2.0f;
+    capture("hud_mascot_pale");
+
+    rep_state();
+    snprintf(g->banner, sizeof(g->banner), "%s", "BONE ORCHARD");
+    g->banner_timer = 1.2f;
+    capture("hud_banner");
+
+    rep_state();
+    g->press_timer = 0.12f;
+    g->press_x = 200.0f;
+    g->press_y = 47.0f;
+    capture_fx("hud_press");
+
     rep_state();
     g->hit_flash = 0.0f;
 }
@@ -479,6 +534,11 @@ static void tour_trail_and_shop(void)
 static void tour_zones_boss_ending(void)
 {
     GraveGame *game = &g->game;
+
+    /* The previous tour may have left a purchase toast on screen; the dialog
+     * page should be captured without it (fixture, not UI state). */
+    g->toast[0] = '\0';
+    g->toast_timer = 0.0f;
 
     grave_world_unlock(game, ZONE_BONE_ORCHARD);
     grave_world_unlock(game, ZONE_OLD_MINE);
