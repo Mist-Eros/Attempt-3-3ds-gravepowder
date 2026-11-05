@@ -126,6 +126,9 @@ typedef struct {
     float    hills_r, hills_g, hills_b;     /* distant hills tint            */
     float    dir_x, dir_y, dir_z;      /* world-space sun direction         */
     float    glow;                     /* 0..1 lantern/ore light pool gain  */
+    float    zombie_boost;             /* zombie body tint boost            */
+    float    eye_glow;                 /* zombie eye glow gain (0..1)       */
+    int      ambient_kind;             /* 0 dust, 1 fireflies, 2 embers     */
 } R3dZonePalette;
 
 /* Ashen Mill keeps the v0.2 dusty tan exactly; Bone Orchard is a colder
@@ -134,15 +137,18 @@ static const R3dZonePalette s_zone_palettes[ZONE_COUNT] = {
     /* ZONE_ASHEN_MILL */
     { 0x7A6E58FFu, 0.4784f, 0.4314f, 0.3451f, 8.0f, 58.0f,
       0.86f, 0.72f, 0.47f, 0.42f, 0.42f, 0.46f, 0.30f, 0.26f, 0.22f,
-      1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, -0.42f, 0.86f, 0.30f, 0.0f },
+      1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, -0.42f, 0.86f, 0.30f, 0.0f,
+      1.08f, 0.45f, 0 },
     /* ZONE_BONE_ORCHARD */
     { 0x596257FFu, 0.34f, 0.38f, 0.34f, 7.0f, 50.0f,
       0.60f, 0.72f, 0.60f, 0.32f, 0.36f, 0.34f, 0.22f, 0.26f, 0.23f,
-      0.90f, 0.96f, 0.90f, 0.80f, 0.86f, 0.80f, -0.30f, 0.80f, 0.40f, 0.15f },
+      0.90f, 0.96f, 0.90f, 0.80f, 0.86f, 0.80f, -0.30f, 0.80f, 0.40f, 0.15f,
+      1.20f, 0.70f, 1 },
     /* ZONE_OLD_MINE */
     { 0x2B2118FFu, 0.23f, 0.175f, 0.125f, 4.0f, 34.0f,
       0.98f, 0.64f, 0.28f, 0.21f, 0.175f, 0.19f, 0.24f, 0.16f, 0.10f,
-      0.68f, 0.60f, 0.53f, 0.36f, 0.28f, 0.21f, -0.30f, 0.75f, 0.45f, 1.0f },
+      0.68f, 0.60f, 0.53f, 0.36f, 0.28f, 0.21f, -0.30f, 0.75f, 0.45f, 1.0f,
+      1.55f, 1.30f, 2 },
 };
 
 static const R3dZonePalette *s_zone_pal;
@@ -168,9 +174,12 @@ static const R3dZonePalette *r3d_palette(void)
 
 #define R3D_MESH_ARENA_BYTES (2u * 1024u * 1024u)
 #define R3D_SCRATCH_VERTS    16384
-#define R3D_DYN_VERTS        2048
+#define R3D_DYN_VERTS        4096
 #define R3D_MAX_PUFFS        24
 #define R3D_DUST_COUNT      16
+#define R3D_MAX_SPARKS      48
+#define R3D_MAX_CASINGS      8
+#define R3D_MAX_AMBIENT     24
 
 /* imported-model runtime (GPM v1) */
 #define R3D_HERO_HEIGHT        1.88f  /* hat-top height in metres (Lead: 1.85-1.90) */
@@ -328,6 +337,42 @@ static float s_draw_dt;
 static float s_aim_blend;   /* 0 = hip, 1 = aiming */
 static float s_aim_pulse;   /* 1 then decays after L is pressed */
 static bool  s_aim_prev;
+/* v0.5 feedback / cuteness */
+typedef struct {
+    Vec3  pos, vel;
+    float age, life, size, r, g, b;
+} R3dSpark;
+typedef struct {
+    Vec3  pos, vel;
+    float age, life, spin, size;
+} R3dCasing;
+typedef struct {
+    Vec3  pos;
+    float age, life, phase;
+} R3dAmbient;
+
+static R3dSpark   s_sparks[R3D_MAX_SPARKS];
+static int        s_spark_next;
+static R3dCasing  s_casings[R3D_MAX_CASINGS];
+static int        s_casing_next;
+static R3dAmbient s_ambient[R3D_MAX_AMBIENT];
+static int        s_ambient_kind = -1;
+static bool       s_ambient_ready;
+
+static float s_world_time;
+static int   s_aim_target = -1;   /* grave_aim_target() result, -1 = none  */
+static float s_aim_lock;           /* smoothed locked-reticle blend        */
+static int   s_prev_total_hits;
+static float s_hit_flash;          /* hitmarker, 1 then decays over 120 ms */
+static int   s_hit_flash_kill;     /* this flash also killed a zombie      */
+static bool  s_zombie_prev_alive[MAX_ZOMBIES];
+static int   s_zombie_prev_state[MAX_ZOMBIES];
+static Vec3  s_zombie_head_pos[MAX_ZOMBIES];   /* skinned head, for eye glow */
+static bool  s_zombie_head_valid[MAX_ZOMBIES];
+static bool  s_pickup_prev_active[MAX_PICKUPS];
+static Vec3  s_pickup_prev_pos[MAX_PICKUPS];
+
+static void casing_spawn(Vec3 muzzle, const Vec3 *right, const Vec3 *up);
 
 static C3D_Mtx s_ortho;
 static C3D_Mtx s_last_projection;
@@ -914,28 +959,41 @@ static void draw_zombie(const Zombie *z, int index, const C3D_Mtx *view)
 
     mesh = &s_zombie_poses[type][zombie_pose_index(z, index)];
 
-    Mtx_Identity(&model);
-    Mtx_Translate(&model, z->pos.x, z->pos.y, z->pos.z, true);
-    Mtx_RotateY(&model, z->yaw, true);
-    if (z->state == ZOMBIE_DYING) {
-        float k = clampf(z->death_time, 0.0f, 1.0f);
-        Mtx_Translate(&model, 0.0f, -0.10f * k, 0.0f, true);
-        Mtx_RotateX(&model, 1.40f * k, true);
-        tint_r = 1.0f - 0.45f * k;
-        tint_g = 1.0f - 0.45f * k;
-        tint_b = 1.0f - 0.40f * k;
-    } else if (z->state == ZOMBIE_STAGGER) {
-        tint_r = 1.55f;
-        tint_g = 1.20f;
-        tint_b = 1.10f;
+    {
+        float die_k = (z->state == ZOMBIE_DYING) ?
+                      clampf(z->death_time, 0.0f, 1.0f) : 0.0f;
+        float phase = z->pos.x * 1.7f + z->pos.z * 0.9f;
+        float sway = sinf(s_world_time * 1.6f + phase) * 0.045f;
+        float bob = 0.012f * sinf(s_world_time * 2.1f + phase * 1.3f);
+        scale *= 1.0f - 0.22f * die_k;
+        Mtx_Identity(&model);
+        Mtx_Translate(&model, z->pos.x, z->pos.y + bob, z->pos.z, true);
+        Mtx_RotateY(&model, z->yaw + sway, true);
+        if (z->state == ZOMBIE_DYING) {
+            Mtx_Translate(&model, 0.0f, -0.12f * die_k, 0.0f, true);
+            Mtx_RotateX(&model, 1.45f * die_k, true);
+            tint_r = 1.0f - 0.62f * die_k;
+            tint_g = 1.0f - 0.62f * die_k;
+            tint_b = 1.0f - 0.58f * die_k;
+        } else if (z->state == ZOMBIE_STAGGER) {
+            tint_r = 1.55f;
+            tint_g = 1.20f;
+            tint_b = 1.10f;
+        }
+        if (type == ZOMBIE_FOREMAN) {
+            /* charred, soot-blackened hide (eyes glow additively) */
+            tint_r = 0.40f;
+            tint_g = 0.35f;
+            tint_b = 0.34f;
+        }
+        {
+            float boost = r3d_palette()->zombie_boost;
+            tint_r *= boost;
+            tint_g *= boost;
+            tint_b *= boost;
+        }
+        Mtx_Scale(&model, scale, scale, scale);
     }
-    if (type == ZOMBIE_FOREMAN) {
-        /* charred, soot-blackened hide (eyes glow additively in zone_glow_build) */
-        tint_r = 0.40f;
-        tint_g = 0.35f;
-        tint_b = 0.34f;
-    }
-    Mtx_Scale(&model, scale, scale, scale);
 
     draw_model(view, mesh, &model, tint_r, tint_g, tint_b, 0.0f);
 }
@@ -1079,7 +1137,8 @@ static void draw_shadows(const GraveGame *game, const C3D_Mtx *view, bool first_
 /* effects                                                            */
 /* ------------------------------------------------------------------ */
 
-static void update_smoke(const GraveGame *game, float dt, Vec3 muzzle, bool muzzle_valid)
+static void update_smoke(const GraveGame *game, float dt, Vec3 muzzle,
+                         bool muzzle_valid, const Vec3 *right, const Vec3 *up)
 {
     float mf = game != NULL ? game->player.muzzle_flash : 0.0f;
     int i;
@@ -1088,6 +1147,9 @@ static void update_smoke(const GraveGame *game, float dt, Vec3 muzzle, bool muzz
     s_have_last_muzzle = muzzle_valid;
 
     if (mf > 0.001f && s_prev_muzzle <= 0.001f) {
+        if (muzzle_valid && game != NULL &&
+            game->player.weapon != WEAPON_FLINTLOCK)
+            casing_spawn(muzzle, right, up);
         for (i = 0; i < 2; i++) {
             SmokePuff *p = &s_puffs[s_puff_next];
             float r1 = hash01((unsigned)s_puff_next * 7919u + 3u);
@@ -1226,10 +1288,17 @@ static void boss_effects_update(const GraveGame *game, float dt)
     }
 }
 
+/* v0.5 additive particles drawn in the same glow pass. */
+static void r3d_asset_log(const char *fmt, ...);
+static void sparks_draw(const Vec3 *right, const Vec3 *up);
+static void casings_draw(const Vec3 *right, const Vec3 *up);
+static void ambient_draw(const Vec3 *right, const Vec3 *up);
+static void r3d_update_creature_fx(const GraveGame *game, Vec3 cam, float dt);
 /* Appends additive glow quads for mine lights, ore and the Foreman's eyes.
  * Must be called after effects_build() reset the dynamic buffer. */
 static void zone_glow_build(const GraveGame *game, const C3D_Mtx *view,
-                            const Vec3 *right, const Vec3 *up)
+                            const Vec3 *cam_pos, const Vec3 *right,
+                            const Vec3 *up)
 {
     const R3dZonePalette *pal = r3d_palette();
     Vec3 ax = v3(1.0f, 0.0f, 0.0f);
@@ -1270,8 +1339,11 @@ static void zone_glow_build(const GraveGame *game, const C3D_Mtx *view,
             wz = p->pos.z - sinf(p->yaw) * lx * sz;
             wy = p->pos.y + ly * sy;
 
-            flick = 0.78f + 0.16f * sinf(t * 7.3f + (float)i * 1.7f) +
+            flick = 0.72f + 0.22f * sinf(t * 8.6f + (float)i * 1.7f) +
+                    0.10f * sinf(t * 23.0f + (float)i * 0.9f) +
                     0.06f * hash01((unsigned)i * 2654435761u + 7u);
+            if (flick < 0.42f)
+                flick = 0.42f;
             flick *= pal->glow;
 
             if (p->kind == PROP_LANTERN) {
@@ -1315,36 +1387,391 @@ static void zone_glow_build(const GraveGame *game, const C3D_Mtx *view,
         }
     }
 
-    /* Foreman: red eye glow + charred halo */
+    /* Every zombie gets readable glowing eyes (amber; Foreman red).  The
+     * aim-assist target burns brighter so the locked reticle and the monster
+     * agree visually. */
+    {
+        float gain = pal->eye_glow * (1.0f + 0.35f * s_aim_blend);
+        int zi;
+        for (zi = 0; zi < MAX_ZOMBIES; zi++) {
+            const Zombie *z = &game->zombies[zi];
+            float height, scale, fwd_x, fwd_z, eye_y, size, inten, blink;
+            Vec3 eye;
+            float cr, cg, cb;
+            bool is_boss;
+
+            if (!z->active || z->state == ZOMBIE_DEAD)
+                continue;
+            height = zombie_type_height(z->type);
+            scale = height / 1.70f;
+            fwd_x = sinf(z->yaw);
+            fwd_z = cosf(z->yaw);
+            eye_y = z->pos.y + height * 0.90f;
+            if (z->state == ZOMBIE_DYING)
+                eye_y -= 0.10f * clampf(z->death_time, 0.0f, 1.0f);
+            if (s_zombie_head_valid[zi]) {
+                Vec3 to_cam = v3_sub(*cam_pos, s_zombie_head_pos[zi]);
+                float d = sqrtf(v3_dot(to_cam, to_cam));
+                if (d > 0.05f) {
+                    eye = v3_add(s_zombie_head_pos[zi],
+                                 v3_scale(to_cam, 0.055f / d));
+                    eye.y -= 0.015f;
+                } else {
+                    eye = s_zombie_head_pos[zi];
+                }
+            } else {
+                eye = v3(z->pos.x + fwd_x * 0.34f * scale, eye_y,
+                         z->pos.z + fwd_z * 0.34f * scale);
+            }
+            if (!world_visible(view, eye, 1.0f))
+                continue;
+
+            is_boss = (z->type == ZOMBIE_FOREMAN);
+            blink = 0.74f + 0.26f * sinf(t * 2.6f + (float)zi * 1.9f +
+                                         z->pos.x * 0.7f);
+            inten = gain * blink;
+            if (zi == s_aim_target)
+                inten *= 1.8f;
+            if (is_boss) {
+                cr = 1.10f; cg = 0.10f; cb = 0.05f;
+            } else {
+                cr = 1.00f; cg = 0.66f; cb = 0.22f;
+            }
+            size = (is_boss ? 0.095f : 0.070f) * height;
+
+            dyn_quad(eye, *right, *up, size, size * 0.62f,
+                     cr * inten * 1.25f, cg * inten * 1.25f,
+                     cb * inten * 1.25f);
+            dyn_quad(eye, *right, *up, size * 2.1f, size * 1.3f,
+                     cr * inten * 0.28f, cg * inten * 0.28f,
+                     cb * inten * 0.28f);
+        }
+    }
+
+    /* Foreman: charred ground halo so the boss footprint reads in the dark */
     boss = find_boss(game);
     if (boss != NULL) {
-        float height = zombie_type_height(boss->type);
-        float scale = height / 1.70f;
+        float scale = zombie_type_height(boss->type) / 1.70f;
         float pulse = 0.80f + 0.20f * sinf(t * 4.1f);
-        Vec3 anchor;
-        float anchor_fwd_x = sinf(boss->yaw);
-        float anchor_fwd_z = cosf(boss->yaw);
-        int e;
-
-        if (s_boss_head_valid) {
-            anchor = s_boss_head_pos;
-        } else {
-            anchor = v3(boss->pos.x + anchor_fwd_x * 0.16f * scale,
-                        boss->pos.y + 0.92f * height,
-                        boss->pos.z + anchor_fwd_z * 0.16f * scale);
-        }
-        for (e = -1; e <= 1; e += 2) {
-            Vec3 eye = v3(anchor.x - anchor_fwd_z * 0.085f * scale * (float)e,
-                          anchor.y + 0.02f * scale,
-                          anchor.z + anchor_fwd_x * 0.085f * scale * (float)e);
-            dyn_quad(eye, *right, *up, 0.045f * scale, 0.032f * scale,
-                     1.10f * pulse, 0.10f, 0.06f);
-            dyn_quad(eye, *right, *up, 0.10f * scale, 0.075f * scale,
-                     0.35f * pulse, 0.03f, 0.02f);
-        }
         dyn_quad(v3(boss->pos.x, boss->pos.y + 0.35f, boss->pos.z),
                  ax, az, 0.9f * scale, 0.9f * scale,
                  0.14f * pulse, 0.04f, 0.02f);
+    }
+
+    /* v0.5 particles share this additive pass */
+    sparks_draw(right, up);
+    casings_draw(right, up);
+    ambient_draw(right, up);
+}
+/* ------------------------------------------------------------------ */
+/* v0.5 particles: sparks, shell casings, zone ambience, feedback     */
+/* ------------------------------------------------------------------ */
+
+static unsigned s_fx_rand = 0x9E3779B9u;
+
+static float fx01(void)
+{
+    s_fx_rand = s_fx_rand * 1664525u + 1013904223u;
+    return (float)((s_fx_rand >> 9) & 0x7FFFu) * (1.0f / 32767.0f);
+}
+
+static void spark_spawn(Vec3 pos, Vec3 vel, float life, float size,
+                        float r, float g, float b)
+{
+    R3dSpark *s = &s_sparks[s_spark_next];
+    s_spark_next = (s_spark_next + 1) % R3D_MAX_SPARKS;
+    s->pos = pos;
+    s->vel = vel;
+    s->age = 0.0f;
+    s->life = life;
+    s->size = size;
+    s->r = r;
+    s->g = g;
+    s->b = b;
+}
+
+/* A cute little puff of sparks: white/gold death puff, pink pickup hearts. */
+static void sparks_burst(Vec3 pos, int count, float spread, float up_bias,
+                         float r, float g, float b, float size)
+{
+    int i;
+    for (i = 0; i < count; i++) {
+        float rx = fx01() - 0.5f;
+        float ry = fx01();
+        float rz = fx01() - 0.5f;
+        Vec3 vel = v3(rx * spread, up_bias * (0.55f + ry), rz * spread);
+        spark_spawn(pos, vel, 0.35f + 0.45f * fx01(),
+                    size * (0.7f + 0.6f * fx01()), r, g, b);
+    }
+}
+
+static void sparks_update(float dt)
+{
+    int i;
+    for (i = 0; i < R3D_MAX_SPARKS; i++) {
+        R3dSpark *s = &s_sparks[i];
+        if (s->life <= 0.0f)
+            continue;
+        s->age += dt;
+        if (s->age >= s->life) {
+            s->life = 0.0f;
+            continue;
+        }
+        s->pos = v3_add(s->pos, v3_scale(s->vel, dt));
+        s->vel.y -= 2.4f * dt;
+        s->vel = v3_scale(s->vel, clampf(1.0f - 1.9f * dt, 0.0f, 1.0f));
+    }
+}
+
+static void casings_update(float dt)
+{
+    int i;
+    for (i = 0; i < R3D_MAX_CASINGS; i++) {
+        R3dCasing *c = &s_casings[i];
+        if (c->life <= 0.0f)
+            continue;
+        c->age += dt;
+        if (c->age >= c->life) {
+            c->life = 0.0f;
+            continue;
+        }
+        c->pos = v3_add(c->pos, v3_scale(c->vel, dt));
+        c->vel.y -= 9.5f * dt;
+        c->spin += dt * 14.0f;
+        if (c->pos.y < 0.03f) {
+            c->pos.y = 0.03f;
+            c->vel.y = -c->vel.y * 0.30f;
+            c->vel.x *= 0.55f;
+            c->vel.z *= 0.55f;
+        }
+    }
+}
+
+/* Brass casing popped out of the revolver/musket; a 0.45 s arc. */
+static void casing_spawn(Vec3 muzzle, const Vec3 *right, const Vec3 *up)
+{
+    R3dCasing *c = &s_casings[s_casing_next];
+    s_casing_next = (s_casing_next + 1) % R3D_MAX_CASINGS;
+    c->pos = v3_add(muzzle, v3_scale(*up, -0.02f));
+    c->vel = v3_add(v3_scale(*right, 1.05f + 0.35f * fx01()),
+                    v3(0.0f, 1.15f + 0.25f * fx01(),
+                       (fx01() - 0.5f) * 0.4f));
+    c->age = 0.0f;
+    c->life = 0.45f;
+    c->spin = fx01() * 6.28f;
+    c->size = 0.012f;
+}
+
+static void ambient_respawn(R3dAmbient *a, Vec3 cam, int kind)
+{
+    float ang = fx01() * 6.2831853f;
+    float dist = 2.5f + fx01() * 6.0f;
+    a->phase = fx01() * 6.2831853f;
+    if (kind == 2) { /* mine embers: low, slow, rising */
+        a->pos = v3(cam.x + cosf(ang) * dist, 0.05f + fx01() * 0.8f,
+                    cam.z + sinf(ang) * dist);
+        a->life = 2.6f + fx01() * 2.6f;
+    } else {         /* orchard fireflies: mid-air wanderers */
+        a->pos = v3(cam.x + cosf(ang) * dist, 0.45f + fx01() * 1.5f,
+                    cam.z + sinf(ang) * dist);
+        a->life = 4.0f + fx01() * 3.5f;
+    }
+    a->age = fx01() * a->life;
+}
+
+static void ambience_update(const R3dZonePalette *pal, Vec3 cam, float dt)
+{
+    int i;
+    int kind = pal->ambient_kind;
+
+    if (kind != s_ambient_kind) {
+        s_ambient_kind = kind;
+        s_ambient_ready = false;
+    }
+    if (kind == 0)
+        return;
+
+    for (i = 0; i < R3D_MAX_AMBIENT; i++) {
+        R3dAmbient *a = &s_ambient[i];
+        float dx, dz;
+        if (!s_ambient_ready || a->age >= a->life) {
+            ambient_respawn(a, cam, kind);
+            continue;
+        }
+        a->age += dt;
+        dx = a->pos.x - cam.x;
+        dz = a->pos.z - cam.z;
+        if (dx * dx + dz * dz > 12.0f * 12.0f) {
+            ambient_respawn(a, cam, kind);
+            continue;
+        }
+        if (kind == 2) {
+            a->pos.y += (0.10f + 0.05f * sinf(a->phase)) * dt;
+            a->pos.x += sinf(a->age * 1.7f + a->phase) * dt * 0.12f;
+            a->pos.z += cosf(a->age * 1.3f + a->phase * 1.7f) * dt * 0.12f;
+        } else {
+            a->pos.x += sinf(a->age * 0.9f + a->phase) * dt * 0.20f;
+            a->pos.z += cosf(a->age * 0.7f + a->phase * 2.1f) * dt * 0.20f;
+            a->pos.y += sinf(a->age * 1.4f + a->phase) * dt * 0.10f;
+        }
+    }
+    s_ambient_ready = true;
+}
+
+static void sparks_draw(const Vec3 *right, const Vec3 *up)
+{
+    int i;
+    for (i = 0; i < R3D_MAX_SPARKS; i++) {
+        const R3dSpark *s = &s_sparks[i];
+        float k, fade, size;
+        if (s->life <= 0.0f)
+            continue;
+        k = s->age / s->life;
+        fade = (1.0f - k) * (1.0f - k);
+        size = s->size * (1.0f + 0.5f * k);
+        dyn_quad(s->pos, *right, *up, size, size,
+                 s->r * fade, s->g * fade, s->b * fade);
+    }
+}
+
+static void casings_draw(const Vec3 *right, const Vec3 *up)
+{
+    int i;
+    for (i = 0; i < R3D_MAX_CASINGS; i++) {
+        const R3dCasing *c = &s_casings[i];
+        Vec3 a1, a2;
+        float k, fade, s;
+        if (c->life <= 0.0f)
+            continue;
+        k = c->age / c->life;
+        fade = 1.0f - k;
+        s = c->size * (1.0f - 0.4f * k);
+        a1 = v3_add(v3_scale(*right, cosf(c->spin)),
+                    v3_scale(*up, sinf(c->spin)));
+        a2 = v3_sub(v3_scale(*up, cosf(c->spin)),
+                    v3_scale(*right, sinf(c->spin)));
+        dyn_quad(c->pos, a1, a2, s, s * 2.0f,
+                 1.0f * fade, 0.72f * fade, 0.30f * fade);
+    }
+}
+
+static void ambient_draw(const Vec3 *right, const Vec3 *up)
+{
+    int i;
+    int kind = s_ambient_kind;
+    if (kind == 0 || !s_ambient_ready)
+        return;
+    for (i = 0; i < R3D_MAX_AMBIENT; i++) {
+        const R3dAmbient *a = &s_ambient[i];
+        float k, fade, blink, size;
+        if (a->age >= a->life)
+            continue;
+        k = a->age / a->life;
+        fade = (k < 0.15f) ? (k / 0.15f) : ((k > 0.80f) ? (1.0f - k) / 0.20f : 1.0f);
+        if (kind == 2) {
+            blink = 0.55f + 0.45f * sinf(a->age * 5.5f + a->phase);
+            size = 0.032f;
+            dyn_quad(a->pos, *right, *up, size, size,
+                     1.20f * fade * blink, 0.50f * fade * blink,
+                     0.12f * fade * blink);
+        } else {
+            blink = 0.25f + 0.75f * (0.5f + 0.5f * sinf(a->age * 2.2f + a->phase));
+            size = 0.030f;
+            dyn_quad(a->pos, *right, *up, size, size,
+                     0.65f * fade * blink, 1.00f * fade * blink,
+                     0.30f * fade * blink);
+            dyn_quad(a->pos, *right, *up, size * 2.4f, size * 2.4f,
+                     0.18f * fade * blink, 0.30f * fade * blink,
+                     0.06f * fade * blink);
+        }
+    }
+}
+
+/* Per-frame feedback: aim-lock query, hitmarker from the lifetime hit counter,
+ * death/pickup sparkles and the particle lifetimes.  Called once per frame. */
+static void r3d_update_creature_fx(const GraveGame *game, Vec3 cam, float dt)
+{
+    const R3dZonePalette *pal = r3d_palette();
+    bool kill_this_frame = false;
+    int i;
+
+    s_world_time = game != NULL ? game->zone_time : 0.0f;
+
+    if (game != NULL && game->phase != GAME_PHASE_TITLE)
+        s_aim_target = grave_aim_target(game);
+    else
+        s_aim_target = -1;
+    {
+        float target = (s_aim_target >= 0) ? 1.0f : 0.0f;
+        s_aim_lock += (target - s_aim_lock) * clampf(dt * 16.0f, 0.0f, 1.0f);
+        if (s_aim_lock < 0.001f)
+            s_aim_lock = 0.0f;
+        else if (s_aim_lock > 0.999f)
+            s_aim_lock = 1.0f;
+    }
+
+    if (game != NULL) {
+        if (game->total_hits > s_prev_total_hits) {
+            s_hit_flash = 1.0f;
+            s_hit_flash_kill = 0;
+        }
+        s_prev_total_hits = game->total_hits;
+
+        for (i = 0; i < MAX_ZOMBIES; i++) {
+            const Zombie *z = &game->zombies[i];
+            bool alive = z->active && z->state != ZOMBIE_DEAD;
+            if (alive && z->state == ZOMBIE_DYING &&
+                s_zombie_prev_state[i] != ZOMBIE_DYING) {
+                float h = zombie_type_height(z->type);
+                Vec3 head = v3(z->pos.x + sinf(z->yaw) * 0.08f,
+                               z->pos.y + 0.82f * h,
+                               z->pos.z + cosf(z->yaw) * 0.08f);
+                sparks_burst(head, 8, 0.55f, 1.3f, 1.0f, 0.92f, 0.72f, 0.030f);
+                sparks_burst(head, 3, 0.40f, 1.0f, 1.0f, 0.42f, 0.18f, 0.024f);
+                burst_spawn(v3(z->pos.x, 0.04f, z->pos.z), 0.9f, 0.55f, 0.7f);
+                kill_this_frame = true;
+            } else if (s_zombie_prev_alive[i] && !alive &&
+                       s_zombie_prev_state[i] != ZOMBIE_DYING) {
+                sparks_burst(v3(z->pos.x, z->pos.y + 0.6f, z->pos.z), 4,
+                             0.4f, 1.0f, 0.90f, 0.85f, 0.70f, 0.020f);
+            }
+            s_zombie_prev_alive[i] = alive;
+            s_zombie_prev_state[i] = z->state;
+        }
+
+        for (i = 0; i < MAX_PICKUPS; i++) {
+            const Pickup *p = &game->pickups[i];
+            bool act = p->active;
+            if (s_pickup_prev_active[i] && !act) {
+                Vec3 at = v3(s_pickup_prev_pos[i].x,
+                             s_pickup_prev_pos[i].y + 0.28f,
+                             s_pickup_prev_pos[i].z);
+                sparks_burst(at, 7, 0.30f, 0.9f, 1.00f, 0.70f, 0.82f, 0.020f);
+            }
+            if (act && fx01() < dt * 0.6f) {
+                spark_spawn(v3(p->pos.x, p->pos.y + 0.22f +
+                                      0.05f * sinf(p->bob_time * 3.0f),
+                               p->pos.z),
+                            v3(0.0f, 0.25f, 0.0f), 0.5f, 0.016f,
+                            1.00f, 0.85f, 0.55f);
+            }
+            s_pickup_prev_active[i] = act;
+            s_pickup_prev_pos[i] = p->pos;
+        }
+    }
+    if (kill_this_frame)
+        s_hit_flash_kill = 1;
+
+    sparks_update(dt);
+    casings_update(dt);
+    ambience_update(pal, cam, dt);
+
+    if (s_hit_flash > 0.0f) {
+        s_hit_flash -= dt / 0.12f;
+        if (s_hit_flash <= 0.0f) {
+            s_hit_flash = 0.0f;
+            s_hit_flash_kill = 0;
+        }
     }
 }
 /* slow drifting dust motes: cheap atmosphere, 16 additive quads */
@@ -1534,6 +1961,19 @@ static void draw_crosshair(void)
     dot_g = clampf(dot_g * boost, 0.0f, 1.0f);
     dot_b = clampf(dot_b * boost, 0.0f, 1.0f);
 
+    /* aim-assist lock: reticle warms to red/white, with a small pulsing ring */
+    {
+        float lock = clampf(s_aim_lock, 0.0f, 1.0f);
+        if (lock > 0.02f) {
+            arm_r += (1.00f - arm_r) * lock;
+            arm_g += (0.16f - arm_g) * lock;
+            arm_b += (0.13f - arm_b) * lock;
+            dot_r += (1.00f - dot_r) * lock;
+            dot_g += (0.28f - dot_g) * lock;
+            dot_b += (0.24f - dot_b) * lock;
+        }
+    }
+
     dyn_reset();
     dyn_quad(v3(cx - gap - len * 0.5f, cy, 0.5f), r, u,
              len * 0.5f * grow, thick * 0.5f, arm_r, arm_g, arm_b);
@@ -1544,6 +1984,41 @@ static void draw_crosshair(void)
     dyn_quad(v3(cx, cy + gap + len * 0.5f, 0.5f), r, u,
              thick * 0.5f, len * 0.5f * grow, arm_r, arm_g, arm_b);
     dyn_quad(v3(cx, cy, 0.5f), r, u, dot * grow, dot * grow, dot_r, dot_g, dot_b);
+
+    /* locked-target pulsing ring */
+    {
+        float lock = clampf(s_aim_lock, 0.0f, 1.0f);
+        if (lock > 0.02f) {
+            float ring_pulse = 1.0f + 0.18f * sinf(s_world_time * 10.0f);
+            float ring_rad = (10.0f + 2.0f * lock) * ring_pulse;
+            int seg;
+            for (seg = 0; seg < 12; seg++) {
+                float a = (float)seg * 0.523599f + s_world_time * 0.7f;
+                dyn_quad(v3(cx + cosf(a) * ring_rad,
+                            cy + sinf(a) * ring_rad, 0.5f),
+                         r, u, 1.6f, 1.6f,
+                         1.0f * lock, 0.26f * lock, 0.22f * lock);
+            }
+        }
+    }
+
+    /* hitmarker: small white X (brighter gold-white + diamond on a kill) for
+     * 120 ms after a hit lands */
+    if (s_hit_flash > 0.01f) {
+        float hf = clampf(s_hit_flash, 0.0f, 1.0f);
+        float sz = (s_hit_flash_kill ? 8.0f : 5.8f) * (0.8f + 0.35f * hf);
+        Vec3 a = v3_norm(v3_add(r, u));
+        Vec3 b = v3_norm(v3_sub(u, r));
+        float hcr = 1.0f;
+        float hcg = s_hit_flash_kill ? 0.92f : 1.0f;
+        float hcb = s_hit_flash_kill ? 0.70f : 1.0f;
+        dyn_quad(v3(cx, cy, 0.5f), a, b, sz, 1.3f, hcr, hcg, hcb);
+        dyn_quad(v3(cx, cy, 0.5f), b, a, sz, 1.3f, hcr, hcg, hcb);
+        if (s_hit_flash_kill) {
+            dyn_quad(v3(cx, cy, 0.5f), a, b, sz * 0.75f, sz * 0.75f,
+                     1.0f, 0.95f, 0.65f);
+        }
+    }
 
     Mtx_Identity(&identity);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_u_projection, &s_ortho);
@@ -2521,20 +2996,36 @@ static void zombie_gpm_model(C3D_Mtx *model, const Zombie *z)
 {
     float height;
     float scale;
+    float die_k = (z->state == ZOMBIE_DYING) ? clampf(z->death_time, 0.0f, 1.0f) : 0.0f;
+    float phase = z->pos.x * 1.7f + z->pos.z * 0.9f;
+    float sway = sinf(s_world_time * 1.6f + phase) * 0.045f;
+    float bob = 0.012f * sinf(s_world_time * 2.1f + phase * 1.3f);
 
     height = zombie_type_height(z->type);
     scale = height / (s_gpm_zombie.bbox_max.y - s_gpm_zombie.bbox_min.y);
+    /* little idle life per instance; dissolves/shrinks while dying */
+    scale *= 1.0f - 0.22f * die_k;
     Mtx_Identity(model);
-    Mtx_Translate(model, z->pos.x, z->pos.y, z->pos.z, true);
-    Mtx_RotateY(model, z->yaw, true);
+    Mtx_Translate(model, z->pos.x, z->pos.y + bob, z->pos.z, true);
+    Mtx_RotateY(model, z->yaw + sway, true);
     Mtx_Scale(model, scale, scale, scale);
     Mtx_Translate(model, 0.0f, -s_zombie_bbox_min_y, 0.0f, true);
     if (z->state == ZOMBIE_DYING) {
-        float k = clampf(z->death_time, 0.0f, 1.0f);
-        Mtx_Translate(model, 0.0f, -0.10f * k, 0.0f, true);
-        Mtx_RotateX(model, 1.40f * k, true);
+        Mtx_Translate(model, 0.0f, -0.12f * die_k, 0.0f, true);
+        Mtx_RotateX(model, 1.45f * die_k, true);
     }
     (void)scale;
+}
+
+static void zombie_store_head(int index, const C3D_Mtx *model, const float *bone_world)
+{
+    C3D_FVec hp;
+    if (index < 0 || index >= MAX_ZOMBIES || bone_world == NULL)
+        return;
+    hp = Mtx_MultiplyFVecH(model,
+                           FVec4_New(bone_world[3], bone_world[7], bone_world[11], 1.0f));
+    s_zombie_head_pos[index] = v3(hp.x, hp.y, hp.z);
+    s_zombie_head_valid[index] = true;
 }
 
 /* Tint per zombie type (the base GPM is shared until per-type models exist). */
@@ -2563,20 +3054,29 @@ static void zombie_gpm_tint(const Zombie *z, float *r, float *g, float *b)
         *b *= 1.1f;
     } else if (z->state == ZOMBIE_DYING) {
         float k = clampf(z->death_time, 0.0f, 1.0f);
-        *r *= 1.0f - 0.45f * k;
-        *g *= 1.0f - 0.45f * k;
-        *b *= 1.0f - 0.40f * k;
+        *r *= 1.0f - 0.62f * k;
+        *g *= 1.0f - 0.62f * k;
+        *b *= 1.0f - 0.58f * k;
+    }
+    {
+        float boost = r3d_palette()->zombie_boost;
+        *r *= boost;
+        *g *= boost;
+        *b *= boost;
     }
 }
 
 
 /* Draws one zombie from the shared far pose (no per-zombie skinning). */
-static void zombie_gpm_draw_far(const Zombie *z, const C3D_Mtx *view)
+static void zombie_gpm_draw_far(const Zombie *z, int index, const C3D_Mtx *view)
 {
     C3D_Mtx model, mv;
     float r, g, b;
 
     zombie_gpm_model(&model, z);
+    if (s_zombie_bone_head >= 0 && s_zombie_far_inited)
+        zombie_store_head(index, &model,
+                          s_zombie_far_skin.world[s_zombie_bone_head]);
     zombie_gpm_tint(z, &r, &g, &b);
     Mtx_Multiply(&mv, view, &model);
     draw_mesh_mv(&mv, &(Mesh){ .vbo = s_zombie_far_vbo,
@@ -2650,15 +3150,15 @@ static void draw_zombies_gpm(const GraveGame *game, const C3D_Mtx *view,
             count = skin_vertices(inst, (SkinVertex *)s_zombie_vbo[slot],
                                   s_zombie_vert_cap);
             if (count > 0) {
-                if (z->type == ZOMBIE_FOREMAN && s_zombie_bone_head >= 0) {
+                if (s_zombie_bone_head >= 0) {
                     C3D_Mtx model;
-                    const float *bw = inst->world[s_zombie_bone_head];
-                    C3D_FVec hp;
                     zombie_gpm_model(&model, z);
-                    hp = Mtx_MultiplyFVecH(&model,
-                                           FVec4_New(bw[3], bw[7], bw[11], 1.0f));
-                    s_boss_head_pos = v3(hp.x, hp.y, hp.z);
-                    s_boss_head_valid = true;
+                    zombie_store_head(list[i].index, &model,
+                                      inst->world[s_zombie_bone_head]);
+                    if (z->type == ZOMBIE_FOREMAN) {
+                        s_boss_head_pos = s_zombie_head_pos[list[i].index];
+                        s_boss_head_valid = true;
+                    }
                 }
                 s_skin_verts_frame += (unsigned)count;
                 s_skin_bones_frame += s_gpm_zombie.bone_count;
@@ -2704,7 +3204,7 @@ static void draw_zombies_gpm(const GraveGame *game, const C3D_Mtx *view,
             s_skin_instances_frame++;
             far_ready = true;
         }
-        zombie_gpm_draw_far(z, view);
+        zombie_gpm_draw_far(z, list[i].index, view);
     }
 }
 
@@ -2933,7 +3433,7 @@ static void draw_world_geometry(const GraveGame *game, const C3D_Mtx *view,
                       flash > 0.0f, flash, first_person ? 0.30f : 1.0f,
                       weapon == WEAPON_MUSKET ? 1.35f : 1.0f);
     }
-    zone_glow_build(game, view, right, up);
+    zone_glow_build(game, view, cam_pos, right, up);
     begin_additive();
     dyn_flush(view, 1.0f, 1.0f, 1.0f, 1.0f);
     end_additive();
@@ -3224,6 +3724,21 @@ void r3d_init(void)
     s_aim_blend = 0.0f;
     s_aim_pulse = 0.0f;
     s_aim_prev = false;
+    s_aim_target = -1;
+    s_aim_lock = 0.0f;
+    s_prev_total_hits = 0;
+    s_hit_flash = 0.0f;
+    s_hit_flash_kill = 0;
+    s_ambient_kind = -1;
+    s_ambient_ready = false;
+    s_world_time = 0.0f;
+    memset(s_sparks, 0, sizeof(s_sparks));
+    memset(s_casings, 0, sizeof(s_casings));
+    memset(s_ambient, 0, sizeof(s_ambient));
+    memset(s_zombie_prev_alive, 0, sizeof(s_zombie_prev_alive));
+    memset(s_zombie_prev_state, 0, sizeof(s_zombie_prev_state));
+    memset(s_pickup_prev_active, 0, sizeof(s_pickup_prev_active));
+    memset(s_pickup_prev_pos, 0, sizeof(s_pickup_prev_pos));
     s_initialized = true;
 }
 
@@ -3396,6 +3911,7 @@ void r3d_draw_world(const GraveGame *game, float dt)
     s_skin_instances_frame = 0;
     s_draw_dt = dt;
     s_boss_head_valid = false;
+    memset(s_zombie_head_valid, 0, sizeof(s_zombie_head_valid));
     boss_effects_update(game, dt);
 
     title = game != NULL && game->phase == GAME_PHASE_TITLE;
@@ -3423,6 +3939,7 @@ void r3d_draw_world(const GraveGame *game, float dt)
     camera_basis(&cam_pos, &cam_look, &fwd, &right, &up);
     s_elapsed += dt;
     dust_update(dt, cam_pos);
+    r3d_update_creature_fx(game, cam_pos, dt);
 
     first_person = !title && game != NULL && game->player.camera_first_person;
 
@@ -3430,7 +3947,7 @@ void r3d_draw_world(const GraveGame *game, float dt)
     {
         Vec3 muzzle = s_have_last_muzzle ? s_last_muzzle
                                          : v3_add(cam_pos, v3_scale(fwd, 0.5f));
-        update_smoke(game, dt, muzzle, s_have_last_muzzle);
+        update_smoke(game, dt, muzzle, s_have_last_muzzle, &right, &up);
     }
 
     if (s_display_3d && s_target_top_right != NULL && !title) {
