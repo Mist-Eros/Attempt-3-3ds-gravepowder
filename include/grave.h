@@ -94,6 +94,7 @@ typedef enum {
     ZOMBIE_SHAMBLER = 0,  /* slow, weak, common                        */
     ZOMBIE_RUNNER,        /* faster, fragile                          */
     ZOMBIE_BRUTE,         /* slow, tanky, hits hard                   */
+    ZOMBIE_FOREMAN,       /* v0.3 boss: huge, slow, hits very hard    */
     ZOMBIE_COUNT
 } ZombieType;
 
@@ -158,6 +159,10 @@ typedef enum {
     PROP_DEADTREE,
     PROP_WELL,
     PROP_GATE,
+    PROP_TIMBER,   /* v0.3 OLD MINE: mine support frame / timber stack  */
+    PROP_CART,     /* v0.3 OLD MINE: mine cart                           */
+    PROP_ORE,      /* v0.3 OLD MINE: glowing crystal/ore cluster         */
+    PROP_LANTERN,  /* v0.3 OLD MINE: lantern post                        */
     PROP_KIND_COUNT
 } PropKind;
 
@@ -247,6 +252,13 @@ typedef struct {
     /* v0.2 (append-only): inventory model for the PACK page - which guns the
      * player owns.  Ammo lives in `ammo[]` above. */
     bool    weapon_owned[WEAPON_COUNT];
+
+    /* v0.3 (append-only): trader upgrades, applied wherever damage / max hp /
+     * reload time are computed. */
+    int     weapon_tune[WEAPON_COUNT]; /* +15% damage per level (max 3)     */
+    int     vitality_level;            /* +10 max hp per level (max 5)      */
+    int     reload_tune;               /* -8% reload time per level (max 3) */
+    float   reload_duration;           /* effective seconds of current reload */
 } Player;
 
 /* ------------------------------------------------------------------ */
@@ -263,6 +275,10 @@ enum {
     GRAVE_EVT_QUEST_DONE= 1u << 6,
     GRAVE_EVT_ZONE_DONE = 1u << 7,
     GRAVE_EVT_EMPTY_GUN = 1u << 8,
+    /* v0.3 */
+    GRAVE_EVT_BOSS_SPAWN     = 1u << 9,
+    GRAVE_EVT_BOSS_DIE       = 1u << 10,
+    GRAVE_EVT_WORLD_COMPLETE = 1u << 11,
 };
 
 /* a shot tracer / impact for the renderer */
@@ -337,6 +353,16 @@ typedef struct {
      * only frees a single slot at a time. */
     int       spawn_wave_left;
     int       spawn_wave_brutes;
+
+    /* ---- v0.3 additions (append-only) ------------------------------- */
+    int       total_shots;    /* lifetime shots fired (saved)              */
+    int       total_hits;     /* lifetime shots that hit a zombie (saved)  */
+    int       boss_spawned;   /* the OLD MINE Foreman spawned this run     */
+    int       boss_alive;     /* Foreman is on the field right now         */
+    bool      boss_defeated;  /* Foreman killed - gates the mine quest     */
+    float     boss_hp;        /* Foreman current hp (UI boss bar)          */
+    float     boss_max_hp;    /* Foreman max hp                            */
+    bool      world_complete; /* OLD MINE cleared - campaign finished      */
 } GraveGame;
 
 /* ------------------------------------------------------------------ */
@@ -400,12 +426,13 @@ int  grave_inventory_ammo(const GraveGame *game, WeaponId id); /* loaded rounds 
 /* Materials only: coins / sinew / bone charms; 0 for other drop kinds. */
 int  grave_inventory_material(const GraveGame *game, GraveDrop drop);
 
-/* ---- save data (v0.2) -------------------------------------------- */
+/* ---- save data (v0.3) -------------------------------------------- */
 
-#define GRAVE_SAVE_MAGIC   0x47505632u /* "GPV2" */
-#define GRAVE_SAVE_VERSION 2u
-/* Fixed on-disk size in bytes; verified at compile time in game.c. */
-#define GRAVE_SAVE_SIZE    92
+#define GRAVE_SAVE_MAGIC   0x47505633u /* "GPV3" */
+#define GRAVE_SAVE_VERSION 3u
+/* Fixed on-disk size in bytes; verified at compile time in game.c.
+ * v2 images are rejected cleanly by the version field (app keeps fresh init). */
+#define GRAVE_SAVE_SIZE    108
 
 /* Portable fixed-size save image.  Serialised little-endian-by-layout (C
  * struct layout, same header on 3DS and host), checksummed, versioned.  The
@@ -434,7 +461,16 @@ typedef struct {
     uint32_t kills_total;
     uint32_t runs;
     float    play_time;
-    uint8_t  reserved[12];      /* keep GRAVE_SAVE_SIZE stable          */
+    uint8_t  reserved[12];      /* keep the v0.2 part's layout stable   */
+
+    /* ---- v0.3 appended fields --------------------------------------- */
+    uint8_t  weapon_tune[WEAPON_COUNT];
+    uint8_t  vitality_level;
+    uint8_t  reload_tune;
+    uint8_t  world_complete;
+    uint8_t  reserved_v3[2];
+    uint32_t shots_fired;
+    uint32_t shots_hit;
 } SaveData;
 
 /* Front-end settings that the core does not simulate but should persist.  All
@@ -460,5 +496,77 @@ int  grave_save_to_buffer(const GraveGame *game, const GraveSettings *settings,
  * On failure returns false and leaves `game` and `settings_out` untouched. */
 bool grave_load_from_buffer(GraveGame *game, GraveSettings *settings_out,
                             const void *buf, int buf_size);
+
+/* ================================================================== */
+/* v0.3: OLD MINE, the Foreman, trader, accuracy, world completion    */
+/*                                                                    */
+/* Everything below is additive; nothing above was renamed/removed.   */
+/* ================================================================== */
+
+/* Arena half extent per zone (metres) so the AREA tab can scale its map. */
+float grave_zone_half_extent(ZoneId zone);
+
+/* ---- trader / shop ----------------------------------------------- */
+/* The shop is only usable on the trail / world map (!world.in_zone).  All
+ * costs are in materials (coins / sinew / bone charms); the core applies the
+ * upgrade immediately on a successful buy. */
+
+typedef enum {
+    SHOP_AMMO = 0,           /* refill every owned gun to full magazine   */
+    SHOP_TUNE_FLINTLOCK,     /* +15% flintlock damage per level (max 3)   */
+    SHOP_TUNE_REVOLVER,      /* +15% revolver damage per level (max 3)    */
+    SHOP_TUNE_MUSKET,        /* +15% musket damage per level (max 3)      */
+    SHOP_VITALITY,           /* +10 max hp per level (max 5)              */
+    SHOP_RELOAD,             /* -8% reload time per level (max 3)         */
+    SHOP_MEDKIT,             /* heal 50% of max hp instantly              */
+    SHOP_ITEM_COUNT
+} ShopItem;
+
+/* Which persistent player level a shop item indexes (NONE = consumable). */
+typedef enum {
+    SHOP_LEVEL_NONE = 0,
+    SHOP_LEVEL_WEAPON_TUNE,  /* levels: player.weapon_tune[spec->weapon]  */
+    SHOP_LEVEL_VITALITY,     /* level: player.vitality_level              */
+    SHOP_LEVEL_RELOAD        /* level: player.reload_tune                 */
+} ShopLevelField;
+
+/* Stable description ids so the UI can style/translate without parsing the
+ * name strings. */
+typedef enum {
+    SHOP_DESC_AMMO = 0,
+    SHOP_DESC_TUNE,
+    SHOP_DESC_VITALITY,
+    SHOP_DESC_RELOAD,
+    SHOP_DESC_MEDKIT,
+    SHOP_DESC_COUNT
+} ShopDesc;
+
+#define SHOP_MAX_LEVELS 5
+
+typedef struct {
+    const char    *name;
+    ShopDesc       desc;
+    /* cost tables indexed by the *current* level (0-based): the price of
+     * buying level+1.  Unused entries are 0. */
+    int            cost_coins[SHOP_MAX_LEVELS];
+    int            cost_sinew[SHOP_MAX_LEVELS];
+    int            cost_charms[SHOP_MAX_LEVELS];
+    int            max_level;      /* 0 = repeatable consumable             */
+    ShopLevelField level_field;
+    int            weapon;         /* WeaponId for tune items, else -1      */
+} ShopItemSpec;
+
+const ShopItemSpec *grave_shop_item(ShopItem item);
+
+/* Current level of the item (0 for consumables / unknown items). */
+int  grave_shop_level(const GraveGame *game, ShopItem item);
+
+/* True when the buy would succeed: on the trail, below max level (or a
+ * repeatable consumable that would actually do something), and affordable. */
+bool grave_shop_can_buy(const GraveGame *game, ShopItem item);
+
+/* Buys + applies the item.  Returns false and changes nothing if
+ * grave_shop_can_buy is false. */
+bool grave_shop_buy(GraveGame *game, ShopItem item);
 
 #endif /* GRAVEPOWDER_H */

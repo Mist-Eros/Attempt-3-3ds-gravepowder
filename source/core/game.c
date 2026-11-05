@@ -492,16 +492,98 @@ static void build_bone_orchard(GraveGame *game)
              vec3_make(0.38f, 0.56f, 0.38f), 0.0f, PROP_BARREL);
 }
 
+/* OLD MINE: a tight mine-works.  A narrow central adit runs from the gate to
+ * the back wall, framed by timber supports and walled in by ore/rock stacks
+ * with two side chambers.  Carts, lantern posts and ore seams dress the works.
+ * The v0.3 PropKinds (timber/cart/ore/lantern) use the same half-extent box
+ * collision as every other prop. */
+static void build_old_mine(GraveGame *game)
+{
+    const float adit_x = 2.0f;
+
+    build_perimeter(game); /* timber palisade + gate */
+
+    /* central adit: timber support frames every 5 m, 3.6 m walkway between */
+    for (int k = 0; k < 6; k++) {
+        float z = 10.0f - 5.0f * (float)k; /* 10, 5, 0, -5, -10, -15 */
+        add_prop(game, vec3_make(-adit_x, 0.0f, z),
+                 vec3_make(0.22f, 1.80f, 0.22f), 0.0f, PROP_TIMBER);
+        add_prop(game, vec3_make(adit_x, 0.0f, z),
+                 vec3_make(0.22f, 1.80f, 0.22f), 0.0f, PROP_TIMBER);
+    }
+
+    /* ore/rock walls flanking the adit, with two side-chamber entrances */
+    for (int k = 0; k < 9; k++) {
+        float z = 13.0f - 3.6f * (float)k; /* 13.0 .. -15.8 */
+        if (k == 2 || k == 5)
+            continue; /* side chambers */
+        add_prop(game, vec3_make(-4.6f, 0.0f, z),
+                 vec3_make(1.10f, 1.15f, 1.30f), 0.0f, PROP_ORE);
+        add_prop(game, vec3_make(4.6f, 0.0f, z),
+                 vec3_make(1.10f, 1.15f, 1.30f), 0.0f, PROP_ORE);
+    }
+
+    /* back wall ore seam + flanking crystal clusters */
+    add_prop(game, vec3_make(0.0f, 0.0f, -17.6f),
+             vec3_make(1.60f, 1.30f, 0.90f), 0.0f, PROP_ORE);
+    add_prop(game, vec3_make(-9.5f, 0.0f, -14.5f),
+             vec3_make(1.30f, 1.05f, 1.10f), 0.4f, PROP_ORE);
+    add_prop(game, vec3_make(9.5f, 0.0f, -14.5f),
+             vec3_make(1.30f, 1.05f, 1.10f), -0.4f, PROP_ORE);
+
+    /* side chambers: timber stacks and ore */
+    add_prop(game, vec3_make(-10.5f, 0.0f, 6.0f),
+             vec3_make(0.95f, 1.30f, 0.55f), 0.0f, PROP_TIMBER);
+    add_prop(game, vec3_make(10.5f, 0.0f, 6.0f),
+             vec3_make(0.95f, 1.30f, 0.55f), 0.0f, PROP_TIMBER);
+    add_prop(game, vec3_make(-10.0f, 0.0f, -5.5f),
+             vec3_make(0.90f, 1.20f, 0.60f), 0.20f, PROP_TIMBER);
+    add_prop(game, vec3_make(10.0f, 0.0f, -5.5f),
+             vec3_make(0.90f, 1.20f, 0.60f), -0.20f, PROP_TIMBER);
+    add_prop(game, vec3_make(-13.5f, 0.0f, 1.0f),
+             vec3_make(1.20f, 1.10f, 1.00f), 0.0f, PROP_ORE);
+    add_prop(game, vec3_make(13.5f, 0.0f, 1.0f),
+             vec3_make(1.20f, 1.10f, 1.00f), 0.0f, PROP_ORE);
+
+    /* mine carts parked near the works */
+    add_prop(game, vec3_make(-8.0f, 0.0f, 9.5f),
+             vec3_make(1.00f, 0.70f, 0.80f), 0.3f, PROP_CART);
+    add_prop(game, vec3_make(8.0f, 0.0f, 9.5f),
+             vec3_make(1.00f, 0.70f, 0.80f), -0.3f, PROP_CART);
+    add_prop(game, vec3_make(-11.5f, 0.0f, -10.5f),
+             vec3_make(0.95f, 0.70f, 0.75f), 0.1f, PROP_CART);
+    add_prop(game, vec3_make(11.5f, 0.0f, -10.5f),
+             vec3_make(0.95f, 0.70f, 0.75f), -0.1f, PROP_CART);
+
+    /* lantern posts lighting the adit and the chambers */
+    add_prop(game, vec3_make(-3.4f, 0.0f, 12.5f),
+             vec3_make(0.14f, 1.35f, 0.14f), 0.0f, PROP_LANTERN);
+    add_prop(game, vec3_make(3.4f, 0.0f, 12.5f),
+             vec3_make(0.14f, 1.35f, 0.14f), 0.0f, PROP_LANTERN);
+    add_prop(game, vec3_make(-3.4f, 0.0f, 2.5f),
+             vec3_make(0.14f, 1.35f, 0.14f), 0.0f, PROP_LANTERN);
+    add_prop(game, vec3_make(3.4f, 0.0f, 2.5f),
+             vec3_make(0.14f, 1.35f, 0.14f), 0.0f, PROP_LANTERN);
+    add_prop(game, vec3_make(-3.4f, 0.0f, -7.5f),
+             vec3_make(0.14f, 1.35f, 0.14f), 0.0f, PROP_LANTERN);
+    add_prop(game, vec3_make(3.4f, 0.0f, -7.5f),
+             vec3_make(0.14f, 1.35f, 0.14f), 0.0f, PROP_LANTERN);
+    add_prop(game, vec3_make(-9.0f, 0.0f, 0.0f),
+             vec3_make(0.14f, 1.35f, 0.14f), 0.0f, PROP_LANTERN);
+    add_prop(game, vec3_make(9.0f, 0.0f, 0.0f),
+             vec3_make(0.14f, 1.35f, 0.14f), 0.0f, PROP_LANTERN);
+}
+
 static void build_zone_layout(GraveGame *game)
 {
-    /* OLD MINE is a v0.2 stub: its spec exists but it still reuses the mill
-     * layout until the mine props are authored. */
     const ZoneSpec *zs = grave_zone_spec(game->zone);
     switch (zs->layout) {
     case ZONE_LAYOUT_BONE_ORCHARD:
         build_bone_orchard(game);
         break;
     case ZONE_LAYOUT_OLD_MINE:
+        build_old_mine(game);
+        break;
     case ZONE_LAYOUT_ASHEN_MILL:
     default:
         build_ashen_mill(game);
@@ -669,6 +751,15 @@ static void player_move(GraveGame *game, const GraveInput *input, float dt)
 /* weapons                                                             */
 /* ================================================================== */
 
+static float player_reload_time(const Player *p, const WeaponSpec *spec)
+{
+    float duration = spec->reload_time *
+                     (1.0f - GRAVE_RELOAD_TIME_STEP * (float)p->reload_tune);
+    if (duration < GRAVE_RELOAD_MIN_TIME)
+        duration = GRAVE_RELOAD_MIN_TIME;
+    return duration;
+}
+
 static void weapon_start_reload(GraveGame *game)
 {
     Player *p = &game->player;
@@ -677,7 +768,8 @@ static void weapon_start_reload(GraveGame *game)
         return;
     if (p->ammo[p->weapon] >= spec->magazine)
         return;
-    p->reload_timer = spec->reload_time;
+    p->reload_duration = player_reload_time(p, spec);
+    p->reload_timer = p->reload_duration;
     p->reload_weapon = p->weapon;
     game->events |= GRAVE_EVT_RELOAD;
 }
@@ -698,14 +790,32 @@ static void damage_zombie(GraveGame *game, int index, float damage)
     const ZombieSpec *spec = grave_zombie_spec(z->type);
 
     z->hp -= damage;
+    if (z->type == ZOMBIE_FOREMAN)
+        game->boss_hp = z->hp > 0.0f ? z->hp : 0.0f;
+
     if (z->hp <= 0.0f) {
         z->hp = 0.0f;
         z->state = ZOMBIE_DYING;
         z->death_time = 0.0f;
         z->attack_timer = 0.0f;
         z->speed = 0.0f;
-        game->zombies_killed++;
         game->total_kills++;
+
+        if (z->type == ZOMBIE_FOREMAN) {
+            /* the Foreman is the mine's final step: fat loot pile, a special
+             * event pair, and it does NOT count towards the normal kill goal */
+            game->boss_defeated = true;
+            game->boss_alive = 0;
+            game->boss_hp = 0.0f;
+            game->events |= GRAVE_EVT_BOSS_DIE | GRAVE_EVT_ZOMBIE_DIE;
+            for (int i = 0; i < GRAVE_BOSS_COIN_DROPS; i++)
+                drop_pickup(game, DROP_COIN, z->pos);
+            for (int i = 0; i < GRAVE_BOSS_CHARM_DROPS; i++)
+                drop_pickup(game, DROP_BONE_CHARM, z->pos);
+            return;
+        }
+
+        game->zombies_killed++;
         game->events |= GRAVE_EVT_ZOMBIE_DIE;
         drop_pickup(game, choose_drop(game), z->pos);
         return;
@@ -824,6 +934,7 @@ static void fire_weapon(GraveGame *game)
                              -1.55f, 1.55f);
         Vec3 dir = aim_dir(yaw, pitch);
 
+        game->total_shots++;
         origin.y += GRAVE_PLAYER_HIT_HEIGHT;
         origin.x += dir.x * GRAVE_MUZZLE_OFFSET;
         origin.y += dir.y * GRAVE_MUZZLE_OFFSET;
@@ -833,10 +944,13 @@ static void fire_weapon(GraveGame *game)
 
         push_trace(game, origin, shot.end, GRAVE_TRACER_LIFE, GRAVE_TRACER_KIND);
         if (shot.hit_zombie) {
-            float damage = (float)spec->damage;
+            float damage = (float)spec->damage *
+                           (1.0f + GRAVE_TUNE_DAMAGE_STEP *
+                                       (float)p->weapon_tune[p->weapon]);
             if (shot.headshot)
                 damage *= GRAVE_HEADSHOT_MULTIPLIER;
             damage_zombie(game, shot.zombie_index, damage);
+            game->total_hits++;
             game->events |= GRAVE_EVT_HIT;
             push_trace(game, shot.end, shot.end, GRAVE_IMPACT_LIFE, GRAVE_IMPACT_KIND);
         } else if (shot.hit_world) {
@@ -1227,6 +1341,44 @@ static void spawn_zombie(GraveGame *game, ZombieType type, Vec3 pos)
     z->drop = DROP_NONE;
 }
 
+/* Spawns the OLD MINE boss exactly once per run, after the kill threshold.
+ * The Foreman uses the normal zombie pool/model, just scaled up by its spec.
+ * When the Foreman arrives the rabble scatters: any remaining normal zombies
+ * fall (DYING) so the finale is a boss duel instead of a boss + horde pile-up. */
+static void spawn_boss(GraveGame *game)
+{
+    const ZombieSpec *spec = grave_zombie_spec(ZOMBIE_FOREMAN);
+    Vec3 pos;
+
+    if (game->boss_spawned)
+        return;
+    if (find_free_zombie(game) < 0)
+        return;
+    if (!find_spawn_point(game, spec->radius, &pos)) {
+        /* deterministic fallback: back of the adit, clear of the walls */
+        pos = vec3_make(0.0f, 0.0f, -14.0f);
+        resolve_world(game, &pos.x, &pos.z, spec->radius);
+    }
+    spawn_zombie(game, ZOMBIE_FOREMAN, pos);
+    for (int i = 0; i < MAX_ZOMBIES; i++) {
+        Zombie *z = &game->zombies[i];
+        if (!z->active || z->type == ZOMBIE_FOREMAN)
+            continue;
+        if (z->state == ZOMBIE_DYING || z->state == ZOMBIE_DEAD)
+            continue;
+        z->state = ZOMBIE_DYING;
+        z->death_time = 0.0f;
+        z->attack_timer = 0.0f;
+        z->speed = 0.0f;
+    }
+    game->zombies_alive = count_active_zombies(game);
+    game->boss_spawned = 1;
+    game->boss_alive = 1;
+    game->boss_max_hp = spec->hp;
+    game->boss_hp = spec->hp;
+    game->events |= GRAVE_EVT_BOSS_SPAWN;
+}
+
 static void update_spawner(GraveGame *game, float dt)
 {
     const ZoneSpec *zs = grave_zone_spec(game->zone);
@@ -1234,6 +1386,11 @@ static void update_spawner(GraveGame *game, float dt)
     int room_alive;
     int room_pool;
     int count;
+
+    /* the Foreman IS the last wave: while he is on the field the mine stops
+     * feeding fresh zombies in, so the boss fight is a boss fight */
+    if (game->boss_alive)
+        return;
 
     if (game->spawn_budget <= 0 && game->spawn_wave_left <= 0)
         return;
@@ -1369,9 +1526,21 @@ static void update_quest(GraveGame *game)
                                   ? game->run_materials[q->material] : q->target;
                 continue;
             }
+            /* OLD MINE's final stage is the Foreman: the collected goods are
+             * not enough until the boss is dead. */
+            if (game->zone == ZONE_OLD_MINE && !game->boss_defeated)
+                return;
             q->kind = QUEST_DONE;
+            /* "clear the job, get paid": the quest payout feeds the trader */
+            game->material_coins += zs->reward_coins;
+            game->material_sinew += zs->reward_sinew;
+            game->material_bone_charms += zs->reward_charms;
             world_mark_complete(game);
             game->events |= GRAVE_EVT_QUEST_DONE | GRAVE_EVT_ZONE_DONE;
+            if (game->zone == ZONE_OLD_MINE) {
+                game->world_complete = true;
+                game->events |= GRAVE_EVT_WORLD_COMPLETE;
+            }
             if (game->phase == GAME_PHASE_PLAYING)
                 game->phase = GAME_PHASE_QUEST_COMPLETE;
             return;
@@ -1410,6 +1579,16 @@ void grave_game_init(GraveGame *game, uint32_t seed)
     grave_update_camera(game, 400.0f / 240.0f);
 }
 
+static float player_max_hp_for(int vitality_level)
+{
+    int level = vitality_level;
+    if (level < 0)
+        level = 0;
+    if (level > GRAVE_VITALITY_MAX_LEVEL)
+        level = GRAVE_VITALITY_MAX_LEVEL;
+    return GRAVE_PLAYER_MAX_HP + GRAVE_VITALITY_HP_STEP * (float)level;
+}
+
 void grave_game_start_zone(GraveGame *game, ZoneId zone)
 {
     const ZoneSpec *zs;
@@ -1417,6 +1596,11 @@ void grave_game_start_zone(GraveGame *game, ZoneId zone)
     bool keep_first_person;
     WeaponId keep_weapon;
     bool keep_owned[WEAPON_COUNT];
+    int keep_tune[WEAPON_COUNT];
+    int keep_ammo[WEAPON_COUNT];
+    int keep_vitality;
+    int keep_reload;
+    float keep_hp;
 
     if (game == NULL)
         return;
@@ -1426,14 +1610,21 @@ void grave_game_start_zone(GraveGame *game, ZoneId zone)
         return; /* progression gate: locked zones cannot be entered */
     zs = grave_zone_spec(zone);
 
-    /* inventory carries across the trail: guns, camera preference and the
-     * material totals survive a zone start.  Only run-local state resets. */
+    /* inventory/upgrades carry across the trail: guns, ammo, trader levels,
+     * camera preference and material totals survive a zone start.  Only
+     * run-local state resets. */
     keep_first_person = game->player.camera_first_person;
     keep_weapon = game->player.weapon;
     if ((int)keep_weapon < 0 || (int)keep_weapon >= WEAPON_COUNT)
         keep_weapon = WEAPON_FLINTLOCK;
-    for (int i = 0; i < WEAPON_COUNT; i++)
+    keep_vitality = game->player.vitality_level;
+    keep_reload = game->player.reload_tune;
+    keep_hp = game->player.hp;
+    for (int i = 0; i < WEAPON_COUNT; i++) {
         keep_owned[i] = game->player.weapon_owned[i];
+        keep_tune[i] = game->player.weapon_tune[i];
+        keep_ammo[i] = game->player.ammo[i];
+    }
     if (!keep_owned[keep_weapon])
         keep_weapon = WEAPON_FLINTLOCK;
 
@@ -1445,16 +1636,26 @@ void grave_game_start_zone(GraveGame *game, ZoneId zone)
 
     p = &game->player;
     memset(p, 0, sizeof(*p));
-    p->max_hp = GRAVE_PLAYER_MAX_HP;
-    p->hp = GRAVE_PLAYER_MAX_HP;
+    p->vitality_level = keep_vitality;
+    p->reload_tune = keep_reload;
+    p->max_hp = player_max_hp_for(keep_vitality);
+    /* HP carries between zones (the trader's medkit is the heal), but a dead
+     * player retrying a zone starts back at full. */
+    p->hp = (keep_hp > 0.0f && keep_hp <= p->max_hp) ? keep_hp : p->max_hp;
     p->alive = true;
     p->stamina = GRAVE_STAMINA_MAX;
     p->weapon = keep_weapon;
     p->reload_weapon = keep_weapon;
     p->camera_first_person = keep_first_person;
     for (int i = 0; i < WEAPON_COUNT; i++) {
+        const WeaponSpec *spec = grave_weapon_spec((WeaponId)i);
         p->weapon_owned[i] = keep_owned[i];
-        p->ammo[i] = grave_weapon_spec((WeaponId)i)->magazine;
+        p->weapon_tune[i] = keep_tune[i];
+        p->ammo[i] = keep_ammo[i];
+        if (p->ammo[i] < 0)
+            p->ammo[i] = 0;
+        if (p->ammo[i] > spec->magazine)
+            p->ammo[i] = spec->magazine;
     }
     if (!p->weapon_owned[WEAPON_FLINTLOCK])
         p->weapon_owned[WEAPON_FLINTLOCK] = true;
@@ -1481,6 +1682,11 @@ void grave_game_start_zone(GraveGame *game, ZoneId zone)
     game->spawn_kill_goal = zs->kill_goal;
     game->spawn_wave_left = 0;
     game->spawn_wave_brutes = 0;
+    game->boss_spawned = 0;
+    game->boss_alive = 0;
+    game->boss_defeated = false;
+    game->boss_hp = 0.0f;
+    game->boss_max_hp = 0.0f;
     game->zone_runs++;
 
     game->world.current = zone;
@@ -1525,6 +1731,12 @@ void grave_game_step(GraveGame *game, const GraveInput *input, float dt)
     update_weapons(game, input, dt);
     update_spawner(game, dt);
     update_zombies(game, dt);
+
+    /* the Foreman walks in once the mine's normal dead are thinned out */
+    if (game->zone == ZONE_OLD_MINE && !game->boss_spawned &&
+        game->zombies_killed >= GRAVE_BOSS_SPAWN_KILLS)
+        spawn_boss(game);
+
     update_shot_traces(game, dt);
 
     if (!p->alive) {
@@ -1805,6 +2017,27 @@ int grave_save_to_buffer(const GraveGame *game, const GraveSettings *settings,
     sd.runs = game->zone_runs > 0 ? (uint32_t)game->zone_runs : 0u;
     sd.play_time = game->total_time > 0.0f ? game->total_time : 0.0f;
 
+    /* v0.3: trader upgrades, world completion and accuracy */
+    for (int i = 0; i < WEAPON_COUNT; i++) {
+        int tune = game->player.weapon_tune[i];
+        if (tune < 0) tune = 0;
+        if (tune > GRAVE_TUNE_MAX_LEVEL) tune = GRAVE_TUNE_MAX_LEVEL;
+        sd.weapon_tune[i] = (uint8_t)tune;
+    }
+    {
+        int vitality = game->player.vitality_level;
+        int reload = game->player.reload_tune;
+        if (vitality < 0) vitality = 0;
+        if (vitality > GRAVE_VITALITY_MAX_LEVEL) vitality = GRAVE_VITALITY_MAX_LEVEL;
+        if (reload < 0) reload = 0;
+        if (reload > GRAVE_RELOAD_MAX_LEVEL) reload = GRAVE_RELOAD_MAX_LEVEL;
+        sd.vitality_level = (uint8_t)vitality;
+        sd.reload_tune = (uint8_t)reload;
+    }
+    sd.world_complete = game->world_complete ? 1u : 0u;
+    sd.shots_fired = game->total_shots > 0 ? (uint32_t)game->total_shots : 0u;
+    sd.shots_hit = game->total_hits > 0 ? (uint32_t)game->total_hits : 0u;
+
     sd.checksum = save_checksum(&sd);
     memcpy(buf, &sd, sizeof(sd));
     return (int)sizeof(sd);
@@ -1903,11 +2136,31 @@ bool grave_load_from_buffer(GraveGame *game, GraveSettings *settings_out,
 
     game->player.camera_first_person = sd.camera_first_person != 0u;
     for (int i = 0; i < WEAPON_COUNT; i++) {
+        int tune = (int)sd.weapon_tune[i];
+        if (tune < 0) tune = 0;
+        if (tune > GRAVE_TUNE_MAX_LEVEL) tune = GRAVE_TUNE_MAX_LEVEL;
         game->player.weapon_owned[i] = owned[i];
         game->player.ammo[i] = ammo[i];
+        game->player.weapon_tune[i] = tune;
     }
+    game->player.vitality_level = sd.vitality_level > 0
+                                      ? (sd.vitality_level > (uint8_t)GRAVE_VITALITY_MAX_LEVEL
+                                             ? GRAVE_VITALITY_MAX_LEVEL
+                                             : (int)sd.vitality_level)
+                                      : 0;
+    game->player.reload_tune = sd.reload_tune > 0
+                                   ? (sd.reload_tune > (uint8_t)GRAVE_RELOAD_MAX_LEVEL
+                                          ? GRAVE_RELOAD_MAX_LEVEL
+                                          : (int)sd.reload_tune)
+                                   : 0;
     game->player.weapon = (WeaponId)weapon;
     game->player.reload_weapon = (WeaponId)weapon;
+
+    game->total_shots = sd.shots_fired > 0x7FFFFFFFu
+                            ? 0x7FFFFFFF : (int)sd.shots_fired;
+    game->total_hits = sd.shots_hit > 0x7FFFFFFFu
+                           ? 0x7FFFFFFF : (int)sd.shots_hit;
+    game->world_complete = sd.world_complete != 0u;
 
     /* a save is loaded at boot / on the trail, so drop any live run state */
     memset(game->zombies, 0, sizeof(game->zombies));
@@ -1926,13 +2179,18 @@ bool grave_load_from_buffer(GraveGame *game, GraveSettings *settings_out,
     game->spawn_kill_goal = 0;
     game->spawn_wave_left = 0;
     game->spawn_wave_brutes = 0;
+    game->boss_spawned = 0;
+    game->boss_alive = 0;
+    game->boss_defeated = false;
+    game->boss_hp = 0.0f;
+    game->boss_max_hp = 0.0f;
     game->quest.kind = QUEST_NONE;
     game->quest.target = 0;
     game->quest.progress = 0;
     game->quest.material = DROP_NONE;
 
-    game->player.max_hp = GRAVE_PLAYER_MAX_HP;
-    game->player.hp = GRAVE_PLAYER_MAX_HP;
+    game->player.max_hp = player_max_hp_for(game->player.vitality_level);
+    game->player.hp = game->player.max_hp;
     game->player.alive = true;
     game->player.stamina = GRAVE_STAMINA_MAX;
     game->player.velocity_y = 0.0f;
@@ -1951,5 +2209,150 @@ bool grave_load_from_buffer(GraveGame *game, GraveSettings *settings_out,
     game->phase = GAME_PHASE_TITLE;
     game->zone = world.current;
     grave_update_camera(game, 400.0f / 240.0f);
+    return true;
+}
+
+/* ================================================================== */
+/* v0.3: trader / shop                                                 */
+/* ================================================================== */
+
+int grave_shop_level(const GraveGame *game, ShopItem item)
+{
+    const ShopItemSpec *spec;
+
+    if (game == NULL || (int)item < 0 || (int)item >= SHOP_ITEM_COUNT)
+        return 0;
+    spec = grave_shop_item(item);
+    switch (spec->level_field) {
+    case SHOP_LEVEL_WEAPON_TUNE:
+        if (spec->weapon < 0 || spec->weapon >= WEAPON_COUNT)
+            return 0;
+        return game->player.weapon_tune[spec->weapon];
+    case SHOP_LEVEL_VITALITY:
+        return game->player.vitality_level;
+    case SHOP_LEVEL_RELOAD:
+        return game->player.reload_tune;
+    case SHOP_LEVEL_NONE:
+    default:
+        return 0;
+    }
+}
+
+/* cost-row index for the next purchase: the current level (or row 0 for a
+ * repeatable consumable) */
+static int shop_cost_row(const GraveGame *game, ShopItem item, const ShopItemSpec *spec)
+{
+    int level;
+    if (spec->max_level <= 0)
+        return 0;
+    level = grave_shop_level(game, item);
+    if (level < 0)
+        level = 0;
+    if (level >= SHOP_MAX_LEVELS)
+        level = SHOP_MAX_LEVELS - 1;
+    return level;
+}
+
+static bool shop_consumable_has_effect(const GraveGame *game, ShopItem item)
+{
+    if (item == SHOP_AMMO) {
+        for (int i = 0; i < WEAPON_COUNT; i++) {
+            if (game->player.weapon_owned[i] &&
+                game->player.ammo[i] < grave_weapon_spec((WeaponId)i)->magazine)
+                return true;
+        }
+        return false;
+    }
+    if (item == SHOP_MEDKIT)
+        return game->player.hp < game->player.max_hp;
+    return true;
+}
+
+bool grave_shop_can_buy(const GraveGame *game, ShopItem item)
+{
+    const ShopItemSpec *spec;
+    int level;
+    int row;
+
+    if (game == NULL || (int)item < 0 || (int)item >= SHOP_ITEM_COUNT)
+        return false;
+    if (game->world.in_zone)
+        return false; /* the trader only sets up on the trail */
+    spec = grave_shop_item(item);
+    level = grave_shop_level(game, item);
+    if (spec->max_level > 0) {
+        if (level >= spec->max_level)
+            return false;
+    } else if (!shop_consumable_has_effect(game, item)) {
+        return false;
+    }
+    row = shop_cost_row(game, item, spec);
+    if (row < 0 || row >= SHOP_MAX_LEVELS)
+        return false;
+    if (game->material_coins < spec->cost_coins[row])
+        return false;
+    if (game->material_sinew < spec->cost_sinew[row])
+        return false;
+    if (game->material_bone_charms < spec->cost_charms[row])
+        return false;
+    return true;
+}
+
+bool grave_shop_buy(GraveGame *game, ShopItem item)
+{
+    const ShopItemSpec *spec;
+    int level;
+    int row;
+
+    if (game == NULL || (int)item < 0 || (int)item >= SHOP_ITEM_COUNT)
+        return false;
+    if (!grave_shop_can_buy(game, item))
+        return false;
+
+    spec = grave_shop_item(item);
+    level = grave_shop_level(game, item);
+    row = shop_cost_row(game, item, spec);
+
+    game->material_coins -= spec->cost_coins[row];
+    game->material_sinew -= spec->cost_sinew[row];
+    game->material_bone_charms -= spec->cost_charms[row];
+
+    switch (item) {
+    case SHOP_AMMO:
+        for (int i = 0; i < WEAPON_COUNT; i++) {
+            if (game->player.weapon_owned[i])
+                game->player.ammo[i] = grave_weapon_spec((WeaponId)i)->magazine;
+        }
+        break;
+
+    case SHOP_TUNE_FLINTLOCK:
+    case SHOP_TUNE_REVOLVER:
+    case SHOP_TUNE_MUSKET:
+        if (spec->weapon >= 0 && spec->weapon < WEAPON_COUNT)
+            game->player.weapon_tune[spec->weapon] = level + 1;
+        break;
+
+    case SHOP_VITALITY: {
+        float old_max = game->player.max_hp;
+        game->player.vitality_level = level + 1;
+        game->player.max_hp = player_max_hp_for(game->player.vitality_level);
+        /* heal by exactly the gained amount, as the spec asks */
+        game->player.hp = clampf(game->player.hp + (game->player.max_hp - old_max),
+                                 0.0f, game->player.max_hp);
+        break;
+    }
+
+    case SHOP_RELOAD:
+        game->player.reload_tune = level + 1;
+        break;
+
+    case SHOP_MEDKIT:
+        game->player.hp = clampf(game->player.hp + 0.5f * game->player.max_hp,
+                                 0.0f, game->player.max_hp);
+        break;
+
+    default:
+        break;
+    }
     return true;
 }

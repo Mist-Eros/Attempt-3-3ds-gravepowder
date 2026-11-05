@@ -123,6 +123,12 @@ typedef struct {
     float runner_share;    /* mid/late-wave runner ratio, 0..1              */
     float brute_chance;    /* random extra brute chance, 0..1               */
 
+    /* Quest payout (v0.3): "clear the job, get paid" - added to the material
+     * inventory when the zone quest completes, so the trader has a sink. */
+    int   reward_coins;
+    int   reward_sinew;
+    int   reward_charms;
+
     /* Which hand-authored prop layout to build (ZONE_LAYOUT_*). */
     int   layout;
 } ZoneSpec;
@@ -135,6 +141,22 @@ enum {
 };
 
 const ZoneSpec *grave_zone_spec(ZoneId zone);
+
+/* ---- v0.3: trader upgrades + OLD MINE boss ------------------------- */
+
+#define GRAVE_TUNE_MAX_LEVEL      3
+#define GRAVE_TUNE_DAMAGE_STEP    0.15f  /* +15% weapon damage per level    */
+#define GRAVE_VITALITY_MAX_LEVEL  5
+#define GRAVE_VITALITY_HP_STEP    10.0f  /* +10 max hp per level            */
+#define GRAVE_RELOAD_MAX_LEVEL    3
+#define GRAVE_RELOAD_TIME_STEP    0.08f  /* -8% reload time per level        */
+#define GRAVE_RELOAD_MIN_TIME     0.20f
+
+/* The Foreman spawns once per OLD MINE run once this many normal zombies have
+ * been killed; its death gates the zone's final quest completion. */
+#define GRAVE_BOSS_SPAWN_KILLS    40
+#define GRAVE_BOSS_COIN_DROPS     5
+#define GRAVE_BOSS_CHARM_DROPS    2
 
 /* ---- shared math helpers (inline, no link dependency) -------------- */
 
