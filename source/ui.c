@@ -298,13 +298,13 @@ UiRect ui_shop_item_rect(int item)
 
 UiRect ui_title_continue_rect(void)
 {
-    UiRect r = { 56.0f, 124.0f, 208.0f, 28.0f };
+    UiRect r = { 56.0f, 122.0f, 208.0f, 24.0f };
     return r;
 }
 
 UiRect ui_title_newgame_rect(void)
 {
-    UiRect r = { 56.0f, 158.0f, 208.0f, 24.0f };
+    UiRect r = { 56.0f, 148.0f, 208.0f, 22.0f };
     return r;
 }
 
@@ -328,7 +328,7 @@ UiRect ui_pause_wardrobe_rect(void)
 
 UiRect ui_settings_save_rect(void)
 {
-    UiRect r = { 48.0f, 156.0f, 224.0f, 24.0f };
+    UiRect r = { 40.0f, 168.0f, 240.0f, 19.0f };
     return r;
 }
 
@@ -407,7 +407,7 @@ UiRect ui_pack_weapon_rect(int index)
 
 UiRect ui_title_start_rect(void)
 {
-    UiRect r = { 62.0f, 166.0f, 196.0f, 30.0f };
+    UiRect r = { 62.0f, 176.0f, 196.0f, 26.0f };
     return r;
 }
 
@@ -437,31 +437,43 @@ UiRect ui_pause_quit_rect(void)
 
 UiRect ui_settings_back_rect(void)
 {
-    UiRect r = { 76.0f, 186.0f, 168.0f, 24.0f };
+    UiRect r = { 40.0f, 189.0f, 240.0f, 19.0f };
     return r;
 }
 
 UiRect ui_settings_camera_rect(void)
 {
-    UiRect r = { 48.0f, 52.0f, 224.0f, 24.0f };
+    UiRect r = { 40.0f, 42.0f, 240.0f, 19.0f };
     return r;
 }
 
 UiRect ui_settings_sens_rect(void)
 {
-    UiRect r = { 48.0f, 78.0f, 224.0f, 24.0f };
+    UiRect r = { 40.0f, 63.0f, 240.0f, 19.0f };
+    return r;
+}
+
+UiRect ui_settings_gyro_rect(void)
+{
+    UiRect r = { 40.0f, 84.0f, 240.0f, 19.0f };
+    return r;
+}
+
+UiRect ui_settings_gyro_sens_rect(void)
+{
+    UiRect r = { 40.0f, 105.0f, 240.0f, 19.0f };
     return r;
 }
 
 UiRect ui_settings_invert_rect(void)
 {
-    UiRect r = { 48.0f, 104.0f, 224.0f, 24.0f };
+    UiRect r = { 40.0f, 126.0f, 240.0f, 19.0f };
     return r;
 }
 
 UiRect ui_settings_mute_rect(void)
 {
-    UiRect r = { 48.0f, 130.0f, 224.0f, 24.0f };
+    UiRect r = { 40.0f, 147.0f, 240.0f, 19.0f };
     return r;
 }
 
@@ -1569,15 +1581,6 @@ static void draw_hud_base(const App *app)
 /* title page                                                         */
 /* ------------------------------------------------------------------ */
 
-static void caption_line(const App *app, float y, const char *left,
-                         const char *right)
-{
-    if (left != NULL)
-        text_left(app, 14.0f, y, 0.34f, COL_BONE_DIM, left);
-    if (right != NULL)
-        text_right(app, 306.0f, y, 0.34f, COL_BONE_DIM, right);
-}
-
 static void draw_title(const App *app)
 {
     float pulse = 0.75f + 0.25f * sinf(app->time * 3.2f);
@@ -1600,6 +1603,7 @@ static void draw_title(const App *app)
     divider(50.0f, 70.0f, 220.0f);
     text_center(app, 160.0f, 6.0f, 0.38f, COL_BONE_DIM,
                 "A 3DS ZOMBIE SHOOTER");
+    text_right(app, 306.0f, 6.0f, 0.32f, COL_BONE_DIM, GRAVEPOWDER_VERSION);
 
     /* red zone ribbon */
     fill_rect(96.0f, 84.0f, 128.0f, 20.0f, COL_BLOOD);
@@ -1624,7 +1628,7 @@ static void draw_title(const App *app)
                 cleared++;
         snprintf(savebuf, sizeof(savebuf), "SAVE: %d/%d ZONES  -  %d:%02d  -  ACC %d%%",
                  cleared, ZONE_COUNT, secs / 60, secs % 60, acc);
-        text_center(app, 160.0f, 108.0f, 0.34f, COL_BONE_DIM, savebuf);
+        text_center(app, 160.0f, 104.0f, 0.34f, COL_BONE_DIM, savebuf);
 
         char contbuf[64];
 
@@ -1632,40 +1636,38 @@ static void draw_title(const App *app)
                      pulse > 0.9f ? COL_HILITE : COL_BRASS_HI);
         snprintf(contbuf, sizeof(contbuf), "CONTINUE  -  %s",
                  grave_zone_name(app_title_target_zone(app)));
-        text_shadow_center(app, 160.0f, cont.y + 7.0f, 0.4f, COL_INK, contbuf);
+        text_shadow_center(app, 160.0f, cont.y + 5.0f, 0.4f, COL_INK, contbuf);
 
         paper_button(ng.x, ng.y, ng.w, ng.h, COL_BRASS);
-        text_shadow_center(app, 160.0f, ng.y + 6.0f, 0.34f, COL_INK,
+        text_shadow_center(app, 160.0f, ng.y + 3.5f, 0.34f, COL_INK,
                            "NEW GAME");
+
+        /* v0.4 control hints: two compact lines above the footer band */
+        dark_panel(36.0f, 172.0f, 248.0f, 34.0f);
+        text_center(app, 160.0f, 176.0f, 0.34f, COL_BONE_DIM,
+                    "TOUCH/L AIM    R FIRE    A RELOAD    B SPRINT");
         text_center(app, 160.0f, 190.0f, 0.34f, COL_BONE_DIM,
-                    "A CONTINUE  -  SELECT NEW GAME");
+                    "X SWAP    Y CAM    SELECT TABS    START PAUSE");
     } else {
         /* control hints on a dark board */
-        dark_panel(40.0f, 112.0f, 240.0f, 48.0f);
-        text_center(app, 160.0f, 116.0f, 0.38f, COL_BONE_DIM,
-                    "PAD MOVE    TOUCH DRAG TO AIM");
-        text_center(app, 160.0f, 129.0f, 0.38f, COL_BONE_DIM,
-                    "A FIRE    B RELOAD    X SWAP WEAPON");
-        text_center(app, 160.0f, 142.0f, 0.38f, COL_BONE_DIM,
-                    "Y CAMERA    SELECT TABS    START PAUSE");
+        dark_panel(36.0f, 108.0f, 248.0f, 58.0f);
+        text_center(app, 160.0f, 112.0f, 0.34f, COL_BONE_DIM,
+                    "PAD MOVE    TOUCH/L AIM");
+        text_center(app, 160.0f, 125.0f, 0.34f, COL_BONE_DIM,
+                    "R FIRE    A RELOAD    B SPRINT");
+        text_center(app, 160.0f, 138.0f, 0.34f, COL_BONE_DIM,
+                    "X SWAP GUN    Y CAMERA");
+        text_center(app, 160.0f, 151.0f, 0.34f, COL_BONE_DIM,
+                    "SELECT TABS    START PAUSE");
 
         {
             UiRect r = ui_title_start_rect();
             u32 fill = pulse > 0.9f ? COL_HILITE : COL_BRASS_HI;
 
             paper_button(r.x, r.y, r.w, r.h, fill);
-            text_shadow_center(app, 160.0f, r.y + 7.0f, 0.55f, COL_INK,
+            text_shadow_center(app, 160.0f, r.y + 5.0f, 0.55f, COL_INK,
                                "PRESS A OR TAP START");
         }
-    }
-
-    divider(40.0f, 196.0f, 240.0f);
-    {
-        char footer[48];
-
-        snprintf(footer, sizeof(footer), "%s  -  %s", GRAVEPOWDER_VERSION,
-                 grave_zone_name(ZONE_ASHEN_MILL));
-        caption_line(app, 202.0f, footer, "3DS HOMEBREW");
     }
 }
 
@@ -1826,14 +1828,12 @@ static void draw_title_confirm_page(const App *app)
 
 static void draw_pause(const App *app)
 {
-    const GraveGame *g = &app->game;
     UiRect panel = { 30.0f, 18.0f, 260.0f, 204.0f };
     UiRect rr = ui_pause_resume_rect();
     UiRect ra = ui_pause_restart_rect();
     UiRect se = ui_pause_settings_rect();
     UiRect wr = ui_pause_wardrobe_rect();
     UiRect qu = ui_pause_quit_rect();
-    char buf[48];
 
     draw_hud_base(app);
     g_z = 1.0f;
@@ -1861,66 +1861,100 @@ static void draw_pause(const App *app)
     text_shadow_center(app, 160.0f, qu.y + 5.0f, 0.38f, COL_INK,
                        "QUIT TO TITLE");
 
-    snprintf(buf, sizeof(buf), "ZONE %s", grave_zone_name(g->zone));
-    text_center(app, 160.0f, 202.0f, 0.32f, COL_INK_SOFT, buf);
+    text_center(app, 160.0f, 202.0f, 0.34f, COL_INK_SOFT,
+                "TOUCH/L AIM  R FIRE  A RELOAD  B SPRINT");
 }
 
 static void draw_settings(const App *app)
 {
     static const char *const kSensName[APP_SENS_COUNT] = { "LOW", "MEDIUM",
                                                            "HIGH" };
+    static const char *const kGyroModeName[GRAVE_GYRO_MODE_COUNT] = {
+        "ON", "OFF", "INVERT"
+    };
+    static const char *const kGyroSensName[GRAVE_GYRO_SENS_COUNT] = {
+        "MED", "LOW", "HIGH"
+    };
     UiRect panel = { 30.0f, 18.0f, 260.0f, 204.0f };
-    UiRect cam = ui_settings_camera_rect();
-    UiRect sen = ui_settings_sens_rect();
-    UiRect inv = ui_settings_invert_rect();
-    UiRect mut = ui_settings_mute_rect();
-    UiRect sv = ui_settings_save_rect();
+    UiRect rows[8];
     UiRect back = ui_settings_back_rect();
     int sens = app->settings.touch_sens;
+    int gyro_mode = app->settings.gyro_mode;
+    int gyro_sens = app->settings.gyro_sens;
+    int i;
 
     if (sens < 0 || sens >= APP_SENS_COUNT)
         sens = APP_SENS_MED;
+    if (gyro_mode < 0 || gyro_mode >= GRAVE_GYRO_MODE_COUNT)
+        gyro_mode = GRAVE_GYRO_ON;
+    if (gyro_sens < 0 || gyro_sens >= GRAVE_GYRO_SENS_COUNT)
+        gyro_sens = GRAVE_GYRO_SENS_MED;
+
+    rows[0] = ui_settings_camera_rect();
+    rows[1] = ui_settings_sens_rect();
+    rows[2] = ui_settings_gyro_rect();
+    rows[3] = ui_settings_gyro_sens_rect();
+    rows[4] = ui_settings_invert_rect();
+    rows[5] = ui_settings_mute_rect();
+    rows[6] = ui_settings_save_rect();
+    rows[7] = back;
 
     draw_hud_base(app);
     g_z = 1.0f;
     fill_rect(0.0f, 0.0f, 320.0f, 240.0f, CLR(0x08, 0x06, 0x04, 0xB4));
 
     paper_panel(panel.x, panel.y, panel.w, panel.h);
-    text_woodcut_center(app, 160.0f, 28.0f, 0.75f, COL_BRASS_HI, "SETTINGS");
+    text_woodcut_center(app, 160.0f, 21.0f, 0.56f, COL_BRASS_HI, "SETTINGS");
 
-    paper_button(cam.x, cam.y, cam.w, cam.h, COL_BRASS);
-    text_left(app, cam.x + 12.0f, cam.y + 6.0f, 0.4f, COL_INK, "CAMERA");
-    text_right(app, cam.x + cam.w - 10.0f, cam.y + 6.0f, 0.4f, COL_BRASS,
-               app->game.player.camera_first_person ? "FIRST PERSON"
-                                                    : "THIRD PERSON");
+    for (i = 0; i < 7; i++) {
+        UiRect r = rows[i];
+        const char *label = "";
+        const char *value = "";
 
-    paper_button(sen.x, sen.y, sen.w, sen.h, COL_BRASS);
-    text_left(app, sen.x + 12.0f, sen.y + 6.0f, 0.4f, COL_INK, "TOUCH SENS");
-    text_right(app, sen.x + sen.w - 10.0f, sen.y + 6.0f, 0.4f, COL_BRASS,
-               kSensName[sens]);
+        switch (i) {
+        case 0:
+            label = "CAMERA";
+            value = app->game.player.camera_first_person ? "FIRST PERSON"
+                                                         : "THIRD PERSON";
+            break;
+        case 1:
+            label = "TOUCH SENS";
+            value = kSensName[sens];
+            break;
+        case 2:
+            label = "GYRO";
+            value = kGyroModeName[gyro_mode];
+            break;
+        case 3:
+            label = "GYRO SPEED";
+            value = kGyroSensName[gyro_sens];
+            break;
+        case 4:
+            label = "INVERT Y";
+            value = app->settings.invert_y ? "ON" : "OFF";
+            break;
+        case 5:
+            label = "MUTE AUDIO";
+            value = app->settings.muted ? "ON" : "OFF";
+            break;
+        case 6:
+        default:
+            label = "SAVE & PROGRESS";
+            value = ">";
+            break;
+        }
 
-    paper_button(inv.x, inv.y, inv.w, inv.h, COL_BRASS);
-    text_left(app, inv.x + 12.0f, inv.y + 6.0f, 0.4f, COL_INK, "INVERT Y");
-    text_right(app, inv.x + inv.w - 10.0f, inv.y + 6.0f, 0.4f, COL_BRASS,
-               app->settings.invert_y ? "ON" : "OFF");
-
-    paper_button(mut.x, mut.y, mut.w, mut.h, COL_BRASS);
-    text_left(app, mut.x + 12.0f, mut.y + 5.0f, 0.38f, COL_INK, "MUTE AUDIO");
-    text_right(app, mut.x + mut.w - 10.0f, mut.y + 5.0f, 0.38f, COL_BRASS,
-               app->settings.muted ? "ON" : "OFF");
-
-    paper_button(sv.x, sv.y, sv.w, sv.h, COL_BRASS);
-    text_left(app, sv.x + 12.0f, sv.y + 5.0f, 0.38f, COL_INK,
-              "SAVE & PROGRESS");
-    text_right(app, sv.x + sv.w - 10.0f, sv.y + 5.0f, 0.38f, COL_BRASS, ">");
+        paper_button(r.x, r.y, r.w, r.h, COL_BRASS);
+        text_left(app, r.x + 10.0f, r.y + 3.0f, 0.34f, COL_INK, label);
+        text_right(app, r.x + r.w - 10.0f, r.y + 3.0f, 0.34f, COL_BRASS,
+                   value);
+    }
 
     paper_button(back.x, back.y, back.w, back.h, COL_BRASS_HI);
-    text_shadow_center(app, back.x + back.w * 0.5f, back.y + 4.0f, 0.4f,
-                       COL_INK, "BACK");
+    text_shadow_center(app, 160.0f, back.y + 3.0f, 0.34f, COL_INK, "BACK");
 }
 
-/* ------------------------------------------------------------------ */
-/* results pages                                                      */
+/* ------------------------------------------------------------------ *//* results pages                                                      */
 /* ------------------------------------------------------------------ */
 
 static void draw_zone_clear(const App *app)
@@ -2201,6 +2235,10 @@ bool ui_hit_test(const App *app, int px, int py, int *action, int *arg)
             local_action = UI_ACTION_TOGGLE_CAMERA;
         } else if (rect_hit(ui_settings_sens_rect(), px, py)) {
             local_action = UI_ACTION_CYCLE_SENS;
+        } else if (rect_hit(ui_settings_gyro_rect(), px, py)) {
+            local_action = UI_ACTION_TOGGLE_GYRO;
+        } else if (rect_hit(ui_settings_gyro_sens_rect(), px, py)) {
+            local_action = UI_ACTION_CYCLE_GYRO_SENS;
         } else if (rect_hit(ui_settings_invert_rect(), px, py)) {
             local_action = UI_ACTION_TOGGLE_INVERT;
         } else if (rect_hit(ui_settings_mute_rect(), px, py)) {

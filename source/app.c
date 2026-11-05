@@ -152,6 +152,8 @@ static void app_delete_save(void)
     a->settings.touch_sens = (uint8_t)APP_SENS_MED;
     a->settings.muted = 0;
     a->settings.reserved = 0;
+    a->settings.gyro_mode = GRAVE_GYRO_ON;
+    a->settings.gyro_sens = GRAVE_GYRO_SENS_MED;
     grave_game_init(&a->game, a->seed++);
     grave_input_reset(&a->input);
     a->known_unlock_mask = unlocked_mask(&a->game);
@@ -453,6 +455,26 @@ static void apply_action(App *a, int action, int arg)
                                            (uint8_t)APP_SENS_COUNT);
         app_save();
         break;
+    case UI_ACTION_TOGGLE_GYRO:
+        /* cycle OFF -> ON -> INVERT (the mode shown in the settings row) */
+        if (a->settings.gyro_mode == GRAVE_GYRO_ON)
+            a->settings.gyro_mode = GRAVE_GYRO_INVERT;
+        else if (a->settings.gyro_mode == GRAVE_GYRO_INVERT)
+            a->settings.gyro_mode = GRAVE_GYRO_OFF;
+        else
+            a->settings.gyro_mode = GRAVE_GYRO_ON;
+        app_save();
+        break;
+    case UI_ACTION_CYCLE_GYRO_SENS:
+        /* cycle LOW -> MED -> HIGH */
+        if (a->settings.gyro_sens == GRAVE_GYRO_SENS_LOW)
+            a->settings.gyro_sens = GRAVE_GYRO_SENS_MED;
+        else if (a->settings.gyro_sens == GRAVE_GYRO_SENS_MED)
+            a->settings.gyro_sens = GRAVE_GYRO_SENS_HIGH;
+        else
+            a->settings.gyro_sens = GRAVE_GYRO_SENS_LOW;
+        app_save();
+        break;
     case UI_ACTION_TOGGLE_INVERT:
         a->settings.invert_y = a->settings.invert_y ? 0u : 1u;
         app_save();
@@ -510,6 +532,10 @@ void app_init(void)
     a->settings.touch_sens = (uint8_t)APP_SENS_MED;
     a->settings.muted = 0;
     a->settings.reserved = 0;
+    a->settings.gyro_mode = GRAVE_GYRO_ON;
+    a->settings.gyro_sens = GRAVE_GYRO_SENS_MED;
+    a->gyro_ok = false;
+    a->gyro_coef = 0.0f;
     a->music = GRAVE_MUSIC_NONE;
     a->prev_hp = 0.0f;
     a->time = 0.0f;
@@ -539,12 +565,41 @@ void app_init(void)
     a->prev_hp = a->game.player.hp;
     audio_set_muted(a->settings.muted != 0);
     audio_set_weapon(a->last_weapon);
+
+    /* sanitise settings loaded from older images, then bring the motion
+     * sensor up; Azahar/Citra may refuse it, which simply disables gyro. */
+    if (a->settings.gyro_mode >= GRAVE_GYRO_MODE_COUNT)
+        a->settings.gyro_mode = GRAVE_GYRO_ON;
+    if (a->settings.gyro_sens >= GRAVE_GYRO_SENS_COUNT)
+        a->settings.gyro_sens = GRAVE_GYRO_SENS_MED;
+    if (a->settings.touch_sens >= APP_SENS_COUNT)
+        a->settings.touch_sens = (uint8_t)APP_SENS_MED;
+
+#ifdef __3DS__
+    {
+        float coef = 0.0f;
+
+        if (R_SUCCEEDED(HIDUSER_EnableGyroscope()) &&
+            R_SUCCEEDED(HIDUSER_GetGyroscopeRawToDpsCoefficient(&coef)) &&
+            coef > 0.0f) {
+            a->gyro_ok = true;
+            a->gyro_coef = coef;
+        } else {
+            a->gyro_ok = false;
+            a->gyro_coef = 0.0f;
+        }
+    }
+#endif
 }
 
 void app_shutdown(void)
 {
     App *a = &g_app;
 
+#ifdef __3DS__
+    if (a->gyro_ok)
+        HIDUSER_DisableGyroscope();
+#endif
     app_save();
     audio_exit();
     if (a->text_buf != NULL)
@@ -575,25 +630,73 @@ void app_poll_input(void)
     grave_input_reset(&a->input);
     grave_input_stick(&a->input, stick.dx, stick.dy);
 
-    /* R = steady walk (precision strafe): slows the camera-relative movement
-     * so it is easy to strafe past a zombie without overshooting.  grave.h has
-     * no dedicated strafe flag in v0.1, so this is applied here. */
-    if (held & KEY_R) {
-        a->input.move_x *= 0.45f;
-        a->input.move_y *= 0.45f;
-    }
-
-    a->input.fire = (held & KEY_A) != 0;
-    a->input.sprint = (held & KEY_L) != 0;
-    a->input.reload = (down & KEY_B) != 0;
+    /* ---------------- buttons (v0.4 "Steady Hands") ---------------- */
+    a->input.fire = (held & KEY_R) != 0;      /* R held                  */
+    a->input.aim = (held & KEY_L) != 0;       /* L held                  */
+    a->input.sprint = (held & KEY_B) != 0;    /* B held                  */
+    a->input.reload = (down & KEY_A) != 0;    /* A tap                   */
     a->input.swap_weapon = (down & KEY_X) != 0;
     a->input.toggle_camera = (down & KEY_Y) != 0;
+
+    /* ---------------- motion: gyro yaw + C-stick fallback ---------------
+     * The app applies gyro_mode/gyro_sens and sends rad/s to the core; the
+     * positive yaw direction is "turn right on screen".  Pitch stays 0. */
+    a->input.gyro_yaw = 0.0f;
+    a->input.gyro_pitch = 0.0f;
+#ifdef __3DS__
+    if (a->gyro_ok && a->settings.gyro_mode != GRAVE_GYRO_OFF) {
+        angularRate rate;
+        float dps;
+        float mult;
+        const float limit = 360.0f;
+
+        hidGyroRead(&rate);
+        dps = (float)rate.z * a->gyro_coef;   /* degrees/second          */
+        if (fabsf(dps) < 1.2f)
+            dps = 0.0f;                        /* deadzone                 */
+        if (a->settings.gyro_sens == GRAVE_GYRO_SENS_LOW)
+            mult = 0.55f;
+        else if (a->settings.gyro_sens == GRAVE_GYRO_SENS_HIGH)
+            mult = 1.7f;
+        else
+            mult = 1.0f;
+        dps *= mult;
+        if (a->settings.gyro_mode == GRAVE_GYRO_INVERT)
+            dps = -dps;
+        if (dps > limit)
+            dps = limit;
+        else if (dps < -limit)
+            dps = -limit;
+        a->input.gyro_yaw = dps * (3.14159265f / 180.0f); /* rad/s       */
+    }
+#endif
+#if defined(KEY_CSTICK_LEFT) && defined(KEY_CSTICK_RIGHT)
+    {
+        float turn = 0.0f;   /* New 3DS digital turn fallback, rad/s */
+
+        if ((held & KEY_CSTICK_LEFT) != 0)
+            turn -= 2.6f;
+        if ((held & KEY_CSTICK_RIGHT) != 0)
+            turn += 2.6f;
+        if (turn != 0.0f)
+            a->input.gyro_yaw += turn;
+
+#if defined(KEY_CSTICK_UP) && defined(KEY_CSTICK_DOWN)
+        if ((held & KEY_CSTICK_UP) != 0)
+            a->input.gyro_pitch += 2.0f;
+        if ((held & KEY_CSTICK_DOWN) != 0)
+            a->input.gyro_pitch -= 2.0f;
+#endif
+    }
+#endif
 
     /* ---------------- touch: drag = aim, short tap = UI ---------------- */
     sens = a->settings.touch_sens;
     if (sens < 0 || sens >= APP_SENS_COUNT)
         sens = APP_SENS_MED;
     sensScale = kSensScale[sens];
+    if (a->input.aim)
+        sensScale *= 0.6f;   /* finer aim while L is held */
 
     hidTouchRead(&touch);
     if ((held & KEY_TOUCH) != 0) {

@@ -104,6 +104,11 @@ struct App {
     bool wardrobe_reload_ok; /* result of the last r3d_reload_all_models() */
     float wardrobe_flash;    /* timer for the reload status line           */
 
+    /* v0.4: 3DS motion sensor state (the gyro code is compiled only on device;
+     * the host preview harness keeps building with these fields at 0/false). */
+    bool gyro_ok;            /* HIDUSER enables + coefficient succeeded    */
+    float gyro_coef;         /* raw gyro units -> degrees/second           */
+
     /* Audio bookkeeping. */
     GraveMusic music;
     int last_weapon;         /* WeaponId last reported to audio_set_weapon()  */
