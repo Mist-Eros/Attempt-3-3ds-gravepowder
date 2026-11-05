@@ -2526,10 +2526,10 @@ static void test_aiming(void)
         for (int trial = 0; trial < 16; trial++) {
             quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
             clear_props(&g);
-            g.rng = 1000u + (uint32_t)trial; /* same spread stream both modes */
+            g.rng = 0x9E3779B9u * (uint32_t)(trial + 1) + 17u;
             place_zombie(&g, 0, ZOMBIE_SHAMBLER,
-                         vec3_make(0.0f, 0.0f, 20.0f), ZOMBIE_CHASE);
-            g.player.transform.pitch = aim_pitch_at(0.9f, 20.0f);
+                         vec3_make(0.0f, 0.0f, 25.0f), ZOMBIE_CHASE);
+            g.player.transform.pitch = aim_pitch_at(0.9f, 25.0f);
             set_weapon(&g, WEAPON_FLINTLOCK);
             grave_input_reset(&in);
             in.fire = true;
@@ -2541,10 +2541,10 @@ static void test_aiming(void)
         for (int trial = 0; trial < 16; trial++) {
             quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
             clear_props(&g);
-            g.rng = 1000u + (uint32_t)trial;
+            g.rng = 0x9E3779B9u * (uint32_t)(trial + 1) + 17u;
             place_zombie(&g, 0, ZOMBIE_SHAMBLER,
-                         vec3_make(0.0f, 0.0f, 20.0f), ZOMBIE_CHASE);
-            g.player.transform.pitch = aim_pitch_at(0.9f, 20.0f);
+                         vec3_make(0.0f, 0.0f, 25.0f), ZOMBIE_CHASE);
+            g.player.transform.pitch = aim_pitch_at(0.9f, 25.0f);
             set_weapon(&g, WEAPON_FLINTLOCK);
             grave_input_reset(&in);
             in.fire = true;
@@ -2560,7 +2560,7 @@ static void test_aiming(void)
     /* aim assist: a near-miss hip shot stays a miss... */
     quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
     clear_props(&g);
-    place_zombie(&g, 0, ZOMBIE_SHAMBLER, vec3_make(0.4f, 0.0f, 10.0f), ZOMBIE_CHASE);
+    place_zombie(&g, 0, ZOMBIE_SHAMBLER, vec3_make(0.6f, 0.0f, 10.0f), ZOMBIE_CHASE);
     g.player.transform.pitch = aim_pitch_at(0.9f, 10.0f);
     set_weapon(&g, WEAPON_MUSKET);
     clear_events(&g);
@@ -2575,7 +2575,7 @@ static void test_aiming(void)
     /* ...but the same near miss is forgiven while aiming */
     quiet_arena(&g, 0.0f, 0.0f, 0.0f, 0.0f);
     clear_props(&g);
-    place_zombie(&g, 0, ZOMBIE_SHAMBLER, vec3_make(0.4f, 0.0f, 10.0f), ZOMBIE_CHASE);
+    place_zombie(&g, 0, ZOMBIE_SHAMBLER, vec3_make(0.6f, 0.0f, 10.0f), ZOMBIE_CHASE);
     g.player.transform.pitch = aim_pitch_at(0.9f, 10.0f);
     set_weapon(&g, WEAPON_MUSKET);
     clear_events(&g);
@@ -2607,7 +2607,7 @@ static void test_aiming(void)
     clear_props(&g);
     add_test_prop(&g, vec3_make(0.2f, 0.0f, 4.0f),
                   vec3_make(1.0f, 2.0f, 1.0f), PROP_CRATE);
-    place_zombie(&g, 0, ZOMBIE_SHAMBLER, vec3_make(0.4f, 0.0f, 10.0f), ZOMBIE_CHASE);
+    place_zombie(&g, 0, ZOMBIE_SHAMBLER, vec3_make(0.6f, 0.0f, 10.0f), ZOMBIE_CHASE);
     g.player.transform.pitch = aim_pitch_at(0.9f, 10.0f);
     set_weapon(&g, WEAPON_MUSKET);
     clear_events(&g);
@@ -2698,6 +2698,304 @@ static void test_gyro_settings(void)
     /* NULL settings stay optional */
     CHECK(grave_save_to_buffer(&g, NULL, buf, sizeof(buf)) == GRAVE_SAVE_SIZE);
     CHECK(grave_load_from_buffer(&g, NULL, buf, sizeof(buf)));
+}
+
+/* ================================================================== */
+/* v0.5: aim assist modes, magnetism, widened hitbox                    */
+/* ================================================================== */
+
+/* quiet arena with exactly one target zombie, no spawns, no props */
+static void single_target_arena(GraveGame *g, ZombieType type, Vec3 pos)
+{
+    quiet_arena(g, 0.0f, 0.0f, 0.0f, 0.0f);
+    clear_props(g);
+    g->spawn_budget = 0;
+    g->spawn_timer = 1.0e9f;
+    memset(g->zombies, 0, sizeof(g->zombies));
+    memset(g->pickups, 0, sizeof(g->pickups));
+    memset(g->shot_traces, 0, sizeof(g->shot_traces));
+    g->zombies_alive = 0;
+    place_zombie(g, 0, type, pos, ZOMBIE_CHASE);
+}
+
+static void test_aim_target_query(void)
+{
+    GraveGame g;
+    float chest;
+
+    CHECK(GRAVE_AIM_ASSIST_OFF == 0);
+    CHECK(GRAVE_AIM_ASSIST_NORMAL == 1);
+    CHECK(GRAVE_AIM_ASSIST_STRONG == 2);
+
+    /* 0.04 rad off-axis at 20 m is inside the NORMAL cone (~0.06) */
+    single_target_arena(&g, ZOMBIE_SHAMBLER, vec3_make(0.8f, 0.0f, 20.0f));
+    chest = grave_zombie_spec(ZOMBIE_SHAMBLER)->body_height * 0.55f;
+    g.player.transform.pitch = aim_pitch_at(chest, 20.0f);
+    g.aim_assist = GRAVE_AIM_ASSIST_NORMAL;
+    g.player.aiming = true;
+    CHECK(grave_aim_target(&g) == 0);
+
+    /* 0.08 rad is outside NORMAL but inside STRONG (~0.11) */
+    g.zombies[0].pos = vec3_make(1.6f, 0.0f, 20.0f);
+    CHECK(grave_aim_target(&g) == -1);
+    g.aim_assist = GRAVE_AIM_ASSIST_STRONG;
+    CHECK(grave_aim_target(&g) == 0);
+
+    /* OFF never reports a target */
+    g.zombies[0].pos = vec3_make(0.8f, 0.0f, 20.0f);
+    g.aim_assist = GRAVE_AIM_ASSIST_OFF;
+    CHECK(grave_aim_target(&g) == -1);
+
+    /* the query requires held aim */
+    g.aim_assist = GRAVE_AIM_ASSIST_NORMAL;
+    g.player.aiming = false;
+    CHECK(grave_aim_target(&g) == -1);
+    g.player.aiming = true;
+
+    /* dying / dead zombies are not targets */
+    g.zombies[0].state = ZOMBIE_DYING;
+    CHECK(grave_aim_target(&g) == -1);
+    g.zombies[0].state = ZOMBIE_CHASE;
+
+    /* behind the player */
+    g.player.transform.yaw = GRAVE_PI;
+    CHECK(grave_aim_target(&g) == -1);
+    g.player.transform.yaw = 0.0f;
+
+    /* beyond weapon range (flintlock 26 m) */
+    g.zombies[0].pos = vec3_make(1.2f, 0.0f, 30.0f);
+    set_weapon(&g, WEAPON_FLINTLOCK);
+    CHECK(grave_aim_target(&g) == -1);
+
+    /* line of fire blocked by a prop */
+    g.zombies[0].pos = vec3_make(0.8f, 0.0f, 20.0f);
+    add_test_prop(&g, vec3_make(0.4f, 0.0f, 10.0f),
+                  vec3_make(1.0f, 2.0f, 1.0f), PROP_CRATE);
+    CHECK(grave_aim_target(&g) == -1);
+    clear_props(&g);
+
+    /* read-only: no RNG draw, no state change */
+    {
+        uint32_t before = hash_game(&g);
+        CHECK(grave_aim_target(&g) == 0);
+        CHECK(hash_game(&g) == before);
+    }
+    CHECK(grave_aim_target(NULL) == -1);
+}
+
+static void test_aim_magnetism(void)
+{
+    GraveGame g;
+    GraveInput in;
+    float desired;
+    float yaw_normal;
+    float chest = grave_zombie_spec(ZOMBIE_SHAMBLER)->body_height * 0.55f;
+
+    /* one step pulls the yaw towards a target inside the cone, no overshoot */
+    single_target_arena(&g, ZOMBIE_SHAMBLER, vec3_make(0.8f, 0.0f, 20.0f));
+    g.aim_assist = GRAVE_AIM_ASSIST_NORMAL;
+    g.player.transform.pitch = aim_pitch_at(chest, 20.0f);
+    grave_input_reset(&in);
+    in.aim = true;
+    step_with(&g, &in);
+    desired = atan2f(0.8f, 20.0f);
+    CHECK(g.player.transform.yaw > 0.0f);
+    CHECK(g.player.transform.yaw < desired); /* moved, not snapped */
+    yaw_normal = g.player.transform.yaw;
+
+    /* converges over a second, never crossing the target (the chasing zombie
+     * drifts slightly, so compare against its live angle) */
+    for (int i = 0; i < 60; i++)
+        step_with(&g, &in);
+    desired = atan2f(g.zombies[0].pos.x - g.player.transform.pos.x,
+                     g.zombies[0].pos.z - g.player.transform.pos.z);
+    CHECK_NEAR(g.player.transform.yaw, desired, 0.004f, "magnetism converges");
+    CHECK(g.player.transform.yaw <= desired + 0.001f); /* no overshoot */
+    CHECK_NEAR(g.player.transform.pitch,
+               atan2f(chest - GRAVE_PLAYER_HIT_HEIGHT,
+                      sqrtf((g.zombies[0].pos.x - g.player.transform.pos.x) *
+                                (g.zombies[0].pos.x - g.player.transform.pos.x) +
+                            (g.zombies[0].pos.z - g.player.transform.pos.z) *
+                                (g.zombies[0].pos.z - g.player.transform.pos.z))),
+               0.02f, "magnetism pitches towards the aim point");
+
+    /* STRONG turns faster than NORMAL for the same initial error */
+    single_target_arena(&g, ZOMBIE_SHAMBLER, vec3_make(0.8f, 0.0f, 20.0f));
+    g.aim_assist = GRAVE_AIM_ASSIST_STRONG;
+    g.player.transform.pitch = aim_pitch_at(chest, 20.0f);
+    grave_input_reset(&in);
+    in.aim = true;
+    step_with(&g, &in);
+    CHECK(g.player.transform.yaw > yaw_normal);
+
+    /* OFF: aiming, but no magnetism at all */
+    single_target_arena(&g, ZOMBIE_SHAMBLER, vec3_make(0.8f, 0.0f, 20.0f));
+    g.aim_assist = GRAVE_AIM_ASSIST_OFF;
+    grave_input_reset(&in);
+    in.aim = true;
+    step_with(&g, &in);
+    CHECK_NEAR(g.player.transform.yaw, 0.0f, 1.0e-6f, "OFF has no magnetism");
+
+    /* no magnetism when not aiming */
+    single_target_arena(&g, ZOMBIE_SHAMBLER, vec3_make(0.8f, 0.0f, 20.0f));
+    g.aim_assist = GRAVE_AIM_ASSIST_NORMAL;
+    grave_input_reset(&in);
+    in.aim = false;
+    step_with(&g, &in);
+    CHECK_NEAR(g.player.transform.yaw, 0.0f, 1.0e-6f, "hip fire no magnetism");
+
+    /* player input easily overrides the pull (turn right hard) */
+    single_target_arena(&g, ZOMBIE_SHAMBLER, vec3_make(0.8f, 0.0f, 20.0f));
+    g.aim_assist = GRAVE_AIM_ASSIST_NORMAL;
+    grave_input_reset(&in);
+    in.aim = true;
+    in.look_x = 1.0f;
+    step_with(&g, &in);
+    CHECK(g.player.transform.yaw < -1.5f);
+}
+
+static void test_aim_assist_firing(void)
+{
+    GraveGame g;
+    GraveInput in;
+    float chest = grave_zombie_spec(ZOMBIE_SHAMBLER)->body_height * 0.55f;
+
+    /* zombie 0.09 rad off-axis at 20 m: wider than the widened body box, so
+     * only an assist cone can convert it.  NORMAL (~0.06) after the magnet
+     * step still can't, STRONG (~0.11) can. */
+    single_target_arena(&g, ZOMBIE_SHAMBLER, vec3_make(1.8f, 0.0f, 20.0f));
+    set_weapon(&g, WEAPON_MUSKET);
+    g.aim_assist = GRAVE_AIM_ASSIST_NORMAL;
+    g.player.transform.pitch = aim_pitch_at(chest, 20.0f);
+    clear_events(&g);
+    grave_input_reset(&in);
+    in.aim = true;
+    in.fire = true;
+    step_with(&g, &in);
+    CHECK((g.events & GRAVE_EVT_HIT) == 0u);
+
+    single_target_arena(&g, ZOMBIE_SHAMBLER, vec3_make(1.8f, 0.0f, 20.0f));
+    set_weapon(&g, WEAPON_MUSKET);
+    g.aim_assist = GRAVE_AIM_ASSIST_STRONG;
+    g.player.transform.pitch = aim_pitch_at(chest, 20.0f);
+    clear_events(&g);
+    grave_input_reset(&in);
+    in.aim = true;
+    in.fire = true;
+    step_with(&g, &in);
+    CHECK((g.events & GRAVE_EVT_HIT) != 0u);
+    CHECK(g.total_hits == 1);
+
+    /* OFF: same aimed near miss is not forgiven */
+    single_target_arena(&g, ZOMBIE_SHAMBLER, vec3_make(0.8f, 0.0f, 20.0f));
+    set_weapon(&g, WEAPON_MUSKET);
+    g.aim_assist = GRAVE_AIM_ASSIST_OFF;
+    g.player.transform.pitch = aim_pitch_at(chest, 20.0f);
+    clear_events(&g);
+    grave_input_reset(&in);
+    in.aim = true;
+    in.fire = true;
+    step_with(&g, &in);
+    CHECK((g.events & GRAVE_EVT_HIT) == 0u);
+
+    /* hip fire never gets assist even with STRONG */
+    single_target_arena(&g, ZOMBIE_SHAMBLER, vec3_make(0.8f, 0.0f, 20.0f));
+    set_weapon(&g, WEAPON_MUSKET);
+    g.aim_assist = GRAVE_AIM_ASSIST_STRONG;
+    g.player.transform.pitch = aim_pitch_at(chest, 20.0f);
+    clear_events(&g);
+    grave_input_reset(&in);
+    in.aim = false;
+    in.fire = true;
+    step_with(&g, &in);
+    CHECK((g.events & GRAVE_EVT_HIT) == 0u);
+}
+
+static void test_hitbox_widen(void)
+{
+    GraveGame g;
+    GraveInput in;
+    const ZombieSpec *brute = grave_zombie_spec(ZOMBIE_BRUTE);
+    float inside = brute->radius + 0.05f; /* outside the true radius */
+    float outside = brute->radius * GRAVE_HITBOX_RADIUS_SCALE + 0.15f;
+
+    CHECK(GRAVE_HITBOX_RADIUS_SCALE > 1.0f);
+
+    /* body box is 20% wider: a shot 5 cm outside the collision radius connects
+     * (hip fire, OFF assist: this is pure hitscan geometry) */
+    single_target_arena(&g, ZOMBIE_BRUTE, vec3_make(inside, 0.0f, 10.0f));
+    set_weapon(&g, WEAPON_MUSKET);
+    g.aim_assist = GRAVE_AIM_ASSIST_OFF;
+    g.player.transform.pitch = aim_pitch_at(brute->body_height * 0.55f, 10.0f);
+    clear_events(&g);
+    grave_input_reset(&in);
+    in.fire = true;
+    step_with(&g, &in);
+    CHECK((g.events & GRAVE_EVT_HIT) != 0u);
+    CHECK(g.total_hits == 1);
+
+    /* clearly outside even the widened box: still a miss */
+    single_target_arena(&g, ZOMBIE_BRUTE, vec3_make(outside, 0.0f, 10.0f));
+    set_weapon(&g, WEAPON_MUSKET);
+    g.aim_assist = GRAVE_AIM_ASSIST_OFF;
+    g.player.transform.pitch = aim_pitch_at(brute->body_height * 0.55f, 10.0f);
+    clear_events(&g);
+    grave_input_reset(&in);
+    in.fire = true;
+    step_with(&g, &in);
+    CHECK((g.events & GRAVE_EVT_HIT) == 0u);
+}
+
+static void test_aim_assist_settings(void)
+{
+    GraveGame g;
+    uint8_t buf[GRAVE_SAVE_SIZE];
+    SaveData sd;
+    GraveSettings settings;
+    GraveSettings loaded;
+
+    grave_game_init(&g, 5u);
+    CHECK(g.aim_assist == (uint8_t)GRAVE_AIM_ASSIST_NORMAL); /* core default */
+
+    memset(&settings, 0, sizeof(settings));
+    settings.aim_assist = (uint8_t)GRAVE_AIM_ASSIST_STRONG;
+    CHECK(grave_save_to_buffer(&g, &settings, buf, sizeof(buf)) == GRAVE_SAVE_SIZE);
+    memcpy(&sd, buf, sizeof(sd));
+    CHECK(sd.version == 3u); /* no save version/size bump */
+    CHECK(sd.bytes == (uint16_t)GRAVE_SAVE_SIZE);
+    CHECK(sd.reserved[2] == 3u); /* mode+1 */
+    CHECK(grave_load_from_buffer(&g, &loaded, buf, sizeof(buf)));
+    CHECK(loaded.aim_assist == (uint8_t)GRAVE_AIM_ASSIST_STRONG);
+
+    /* OFF round-trips as stored value 1 */
+    settings.aim_assist = (uint8_t)GRAVE_AIM_ASSIST_OFF;
+    CHECK(grave_save_to_buffer(&g, &settings, buf, sizeof(buf)) == GRAVE_SAVE_SIZE);
+    memcpy(&sd, buf, sizeof(sd));
+    CHECK(sd.reserved[2] == 1u);
+    CHECK(grave_load_from_buffer(&g, &loaded, buf, sizeof(buf)));
+    CHECK(loaded.aim_assist == (uint8_t)GRAVE_AIM_ASSIST_OFF);
+
+    /* a pre-v0.5 image (zeroed reserved[2] = unset) loads as NORMAL */
+    memcpy(&sd, buf, sizeof(sd));
+    sd.reserved[2] = 0u;
+    memcpy(buf, &sd, sizeof(sd));
+    test_recompute_save_checksum(buf);
+    CHECK(grave_load_from_buffer(&g, &loaded, buf, sizeof(buf)));
+    CHECK(loaded.aim_assist == (uint8_t)GRAVE_AIM_ASSIST_NORMAL);
+
+    /* junk reserved value sanitises to NORMAL */
+    memcpy(&sd, buf, sizeof(sd));
+    sd.reserved[2] = 9u;
+    memcpy(buf, &sd, sizeof(sd));
+    test_recompute_save_checksum(buf);
+    CHECK(grave_load_from_buffer(&g, &loaded, buf, sizeof(buf)));
+    CHECK(loaded.aim_assist == (uint8_t)GRAVE_AIM_ASSIST_NORMAL);
+
+    /* the core sanitises a junk mirrored mode too (no effect, no crash) */
+    g.aim_assist = 200u;
+    CHECK(grave_aim_target(&g) == -1);
+    g.player.aiming = true;
+    CHECK(grave_aim_target(&g) == -1);
 }
 
 /* ================================================================== */
@@ -3378,6 +3676,11 @@ int main(void)
     printf("  axis + gyro ... ");     test_axis_and_gyro();   printf("done\n");
     printf("  aiming ... ");          test_aiming();          printf("done\n");
     printf("  gyro settings ... ");   test_gyro_settings();   printf("done\n");
+    printf("  aim target query ... "); test_aim_target_query(); printf("done\n");
+    printf("  aim magnetism ... ");   test_aim_magnetism();   printf("done\n");
+    printf("  aim assist firing ... "); test_aim_assist_firing(); printf("done\n");
+    printf("  hitbox widen ... ");    test_hitbox_widen();    printf("done\n");
+    printf("  aim assist settings ... "); test_aim_assist_settings(); printf("done\n");
     printf("  save data ... ");       test_save();            printf("done\n");
     printf("  camera ... ");          test_camera();          printf("done\n");
     printf("  phases ... ");          test_phases();          printf("done\n");

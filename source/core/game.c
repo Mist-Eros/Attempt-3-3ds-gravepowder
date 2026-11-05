@@ -934,12 +934,14 @@ static void hitscan(GraveGame *game, Vec3 origin, Vec3 dir, float range, ShotRes
             continue;
         spec = grave_zombie_spec(z->type);
 
-        mn.x = z->pos.x - spec->radius;
+        /* v0.5: body box is 20% wider than the render/collision radius (head
+         * sphere below is unchanged) so near-miss shots connect more often. */
+        mn.x = z->pos.x - spec->radius * GRAVE_HITBOX_RADIUS_SCALE;
         mn.y = z->pos.y;
-        mn.z = z->pos.z - spec->radius;
-        mx.x = z->pos.x + spec->radius;
+        mn.z = z->pos.z - spec->radius * GRAVE_HITBOX_RADIUS_SCALE;
+        mx.x = z->pos.x + spec->radius * GRAVE_HITBOX_RADIUS_SCALE;
         mx.y = z->pos.y + spec->body_height - GRAVE_BODY_TOP_DROP;
-        mx.z = z->pos.z + spec->radius;
+        mx.z = z->pos.z + spec->radius * GRAVE_HITBOX_RADIUS_SCALE;
         hit_body = ray_aabb(origin, dir, best, mn, mx, &t_body);
         if (!hit_body)
             t_body = best;
@@ -970,19 +972,55 @@ static void hitscan(GraveGame *game, Vec3 origin, Vec3 dir, float range, ShotRes
     out->headshot = best_head;
 }
 
-/* Aim assist (v0.4): a held-aim shot that missed gets one forgiving cone test
- * against the nearest zombie inside GRAVE_AIM_ASSIST_RAD of the aim ray, with
- * a clear line of fire and inside weapon range.  Hip-fire never assists. */
-static bool aim_assist(GraveGame *game, Vec3 origin, Vec3 dir, float range,
-                       ShotResult *shot)
+/* ---- v0.5: aim assist / magnetism ---------------------------------- */
+
+static int sanitize_aim_assist(int mode)
+{
+    if (mode < GRAVE_AIM_ASSIST_OFF || mode >= GRAVE_AIM_ASSIST_COUNT)
+        return GRAVE_AIM_ASSIST_NORMAL;
+    return mode;
+}
+
+static float aim_assist_cone(int mode)
+{
+    switch (mode) {
+    case GRAVE_AIM_ASSIST_STRONG:
+        return GRAVE_AIM_ASSIST_STRONG_RAD;
+    case GRAVE_AIM_ASSIST_NORMAL:
+        return GRAVE_AIM_ASSIST_NORMAL_RAD;
+    default:
+        return 0.0f; /* OFF */
+    }
+}
+
+static float aim_magnet_speed(int mode)
+{
+    return mode == GRAVE_AIM_ASSIST_STRONG ? GRAVE_AIM_MAGNET_STRONG
+                                           : GRAVE_AIM_MAGNET_NORMAL;
+}
+
+/* Nearest zombie (by distance) whose aim point is inside `cone` of `dir`,
+ * within `range` and with a clear line of fire; returns the index or -1 and
+ * optionally the aim point / distance.  Pure read-only: used by the public
+ * query, the magnetism and the assist hit test. */
+static int aim_find_target(const GraveGame *game, Vec3 origin, Vec3 dir,
+                           float cone, float range, Vec3 *point_out,
+                           float *dist_out)
 {
     int best = -1;
     float best_dist = range;
-    float min_dot = cosf(GRAVE_AIM_ASSIST_RAD);
+    float min_dot;
+
+    if (point_out != NULL)
+        *point_out = origin;
+    if (cone <= 0.0f)
+        return -1;
+    min_dot = cosf(cone);
 
     for (int i = 0; i < MAX_ZOMBIES; i++) {
         const Zombie *z = &game->zombies[i];
         const ZombieSpec *spec;
+        Vec3 point;
         Vec3 to;
         float dist;
         float dot;
@@ -991,9 +1029,12 @@ static bool aim_assist(GraveGame *game, Vec3 origin, Vec3 dir, float range,
         if (!z->active || z->state == ZOMBIE_DYING || z->state == ZOMBIE_DEAD)
             continue;
         spec = grave_zombie_spec(z->type);
-        to.x = z->pos.x - origin.x;
-        to.y = (z->pos.y + spec->body_height * 0.55f) - origin.y;
-        to.z = z->pos.z - origin.z;
+        point = vec3_make(z->pos.x,
+                          z->pos.y + spec->body_height * 0.55f,
+                          z->pos.z);
+        to.x = point.x - origin.x;
+        to.y = point.y - origin.y;
+        to.z = point.z - origin.z;
         dist = sqrtf(to.x * to.x + to.y * to.y + to.z * to.z);
         if (dist < 1.0e-4f || dist > range)
             continue;
@@ -1020,19 +1061,103 @@ static bool aim_assist(GraveGame *game, Vec3 origin, Vec3 dir, float range,
         if (dist < best_dist) {
             best_dist = dist;
             best = i;
+            if (point_out != NULL)
+                *point_out = point;
         }
     }
 
-    if (best < 0)
-        return false;
-    shot->hit_zombie = true;
-    shot->zombie_index = best;
-    shot->headshot = false;
-    shot->hit_world = false;
-    shot->end.x = origin.x + dir.x * best_dist;
-    shot->end.y = origin.y + dir.y * best_dist;
-    shot->end.z = origin.z + dir.z * best_dist;
-    return true;
+    if (dist_out != NULL)
+        *dist_out = best_dist;
+    return best;
+}
+
+/* v0.5: gentle magnetism while holding aim.  The player's own look input is
+ * applied first each step, so pushing away always wins; this only helps
+ * tracking by rotating toward the assist target at a capped angular speed
+ * (error-scaled, and clamped so it can never overshoot the target). */
+static void aim_magnetism(GraveGame *game, float dt)
+{
+    Player *p = &game->player;
+    int mode;
+    float cone;
+    float speed;
+    Vec3 origin;
+    Vec3 dir;
+    Vec3 point;
+    float dist = 0.0f;
+    float horiz;
+    float desired_yaw;
+    float desired_pitch;
+    float yaw_err;
+    float pitch_err;
+    float ang;
+    float step;
+    float scale;
+
+    if (!p->aiming)
+        return;
+    mode = sanitize_aim_assist(game->aim_assist);
+    cone = aim_assist_cone(mode);
+    if (cone <= 0.0f)
+        return;
+
+    origin = p->transform.pos;
+    origin.y += GRAVE_PLAYER_HIT_HEIGHT;
+    dir = aim_dir(p->transform.yaw, p->transform.pitch);
+    if (aim_find_target(game, origin, dir, cone,
+                        grave_weapon_spec(p->weapon)->range, &point,
+                        &dist) < 0)
+        return;
+    (void)dist;
+
+    horiz = sqrtf((point.x - origin.x) * (point.x - origin.x) +
+                  (point.z - origin.z) * (point.z - origin.z));
+    if (horiz < 0.001f)
+        horiz = 0.001f;
+    desired_yaw = atan2f(point.x - origin.x, point.z - origin.z);
+    desired_pitch = atan2f(point.y - origin.y, horiz);
+    yaw_err = grave_wrap_pi(desired_yaw - p->transform.yaw);
+    pitch_err = desired_pitch - p->transform.pitch;
+    ang = sqrtf(yaw_err * yaw_err + pitch_err * pitch_err);
+    if (ang < 1.0e-4f)
+        return;
+
+    speed = aim_magnet_speed(mode);
+    step = speed * dt;
+    if (step > ang)
+        step = ang; /* finish without overshoot */
+    /* error scaling uses the NORMAL cone as the reference so STRONG is always
+     * at least as strong as NORMAL for the same error; tiny corrections stay
+     * gentle so it does not feel like a snap. */
+    scale = clampf(ang / GRAVE_AIM_ASSIST_NORMAL_RAD, 0.25f, 1.0f);
+    step *= scale;
+    if (step <= 0.0f)
+        return;
+    p->transform.yaw = grave_wrap_pi(p->transform.yaw + yaw_err / ang * step);
+    p->transform.pitch = clampf(p->transform.pitch + pitch_err / ang * step,
+                                -GRAVE_PITCH_LIMIT, GRAVE_PITCH_LIMIT);
+}
+
+/* Public read-only reticle query (v0.5). */
+int grave_aim_target(const GraveGame *game)
+{
+    int mode;
+    float cone;
+    Vec3 origin;
+    Vec3 dir;
+
+    if (game == NULL || !game->player.aiming)
+        return -1;
+    mode = sanitize_aim_assist(game->aim_assist);
+    cone = aim_assist_cone(mode);
+    if (cone <= 0.0f)
+        return -1;
+    origin = game->player.transform.pos;
+    origin.y += GRAVE_PLAYER_HIT_HEIGHT;
+    dir = aim_dir(game->player.transform.yaw, game->player.transform.pitch);
+    return aim_find_target(game, origin, dir, cone,
+                           grave_weapon_spec(game->player.weapon)->range,
+                           NULL, NULL);
 }
 
 static void fire_weapon(GraveGame *game)
@@ -1069,8 +1194,24 @@ static void fire_weapon(GraveGame *game)
         origin.z += dir.z * GRAVE_MUZZLE_OFFSET;
 
         hitscan(game, origin, dir, spec->range, &shot);
-        if (!shot.hit_zombie && p->aiming)
-            (void)aim_assist(game, origin, dir, spec->range, &shot);
+        if (!shot.hit_zombie && p->aiming) {
+            int mode = sanitize_aim_assist(game->aim_assist);
+            float cone = aim_assist_cone(mode);
+            Vec3 point;
+            float assist_dist = 0.0f;
+            int target = aim_find_target(game, origin, dir, cone, spec->range,
+                                         &point, &assist_dist);
+            (void)point;
+            if (target >= 0) {
+                shot.hit_zombie = true;
+                shot.zombie_index = target;
+                shot.headshot = false;
+                shot.hit_world = false;
+                shot.end.x = origin.x + dir.x * assist_dist;
+                shot.end.y = origin.y + dir.y * assist_dist;
+                shot.end.z = origin.z + dir.z * assist_dist;
+            }
+        }
 
         push_trace(game, origin, shot.end, GRAVE_TRACER_LIFE, GRAVE_TRACER_KIND);
         if (shot.hit_zombie) {
@@ -1705,6 +1846,7 @@ void grave_game_init(GraveGame *game, uint32_t seed)
         game->player.weapon_owned[i] = true; /* all v0.1/v0.2 guns are owned */
     }
     game->quest.kind = QUEST_NONE;
+    game->aim_assist = GRAVE_AIM_ASSIST_NORMAL;
     grave_world_init(game);
     grave_update_camera(game, 400.0f / 240.0f);
 }
@@ -1855,6 +1997,7 @@ void grave_game_step(GraveGame *game, const GraveInput *input, float dt)
 
     p->aiming = input->aim;
     player_look(game, input, dt);
+    aim_magnetism(game, dt);
     if (input->toggle_camera)
         p->camera_first_person = !p->camera_first_person;
 
@@ -2135,6 +2278,9 @@ int grave_save_to_buffer(const GraveGame *game, const GraveSettings *settings,
                              ? settings->gyro_mode : (uint8_t)GRAVE_GYRO_ON;
         sd.reserved[1] = settings->gyro_sens <= (uint8_t)GRAVE_GYRO_SENS_HIGH
                              ? settings->gyro_sens : (uint8_t)GRAVE_GYRO_SENS_MED;
+        /* v0.5: aim assist mode in reserved[2], offset by one so a pre-v0.5
+         * image (zero byte = unset) loads as NORMAL rather than OFF. */
+        sd.reserved[2] = (uint8_t)(sanitize_aim_assist(settings->aim_assist) + 1);
     }
 
     for (int i = 0; i < WEAPON_COUNT; i++) {
@@ -2264,10 +2410,17 @@ bool grave_load_from_buffer(GraveGame *game, GraveSettings *settings_out,
                                       ? sd.reserved[0] : (uint8_t)GRAVE_GYRO_ON;
         settings_out->gyro_sens = sd.reserved[1] <= (uint8_t)GRAVE_GYRO_SENS_HIGH
                                       ? sd.reserved[1] : (uint8_t)GRAVE_GYRO_SENS_MED;
+        /* v0.5: aim assist mode was stored as mode+1; 0 = pre-v0.5 image. */
+        if (sd.reserved[2] == 0u)
+            settings_out->aim_assist = (uint8_t)GRAVE_AIM_ASSIST_NORMAL;
+        else
+            settings_out->aim_assist = (uint8_t)sanitize_aim_assist(
+                (int)sd.reserved[2] - 1);
     }
 
     /* ---- apply ---- */
     game->world = world;
+    game->aim_assist = GRAVE_AIM_ASSIST_NORMAL; /* app syncs from settings */
     game->material_coins = sd.material_coins > 0 ? (int)sd.material_coins : 0;
     game->material_sinew = sd.material_sinew > 0 ? (int)sd.material_sinew : 0;
     game->material_bone_charms = sd.material_bone_charms > 0

@@ -56,7 +56,16 @@
 #define GRAVE_AIM_RECOIL_SCALE      0.70f  /* weapon kick multiplier              */
 #define GRAVE_AIM_FOV               50.0f  /* vertical FOV while aiming, degrees  */
 #define GRAVE_AIM_TP_DISTANCE       2.0f   /* third-person camera distance, metres */
-#define GRAVE_AIM_ASSIST_RAD        0.05f  /* ~2.9 deg cone for missing shots      */
+/* v0.5: per-setting assist cone radii (only while aiming, LOS + range). */
+#define GRAVE_AIM_ASSIST_OFF_RAD    0.0f
+#define GRAVE_AIM_ASSIST_NORMAL_RAD 0.06f  /* ~3.4 deg                             */
+#define GRAVE_AIM_ASSIST_STRONG_RAD 0.11f  /* ~6.3 deg                             */
+/* v0.5: max angular speed of the aim magnetism (rad/s). */
+#define GRAVE_AIM_MAGNET_NORMAL     1.6f
+#define GRAVE_AIM_MAGNET_STRONG     2.8f
+/* v0.5: zombie body hit box half-width/depth scale (hitscan only; the head
+ * sphere is untouched so headshot geometry/logic is unchanged). */
+#define GRAVE_HITBOX_RADIUS_SCALE   1.20f
 
 /* ---- weapons ------------------------------------------------------ */
 

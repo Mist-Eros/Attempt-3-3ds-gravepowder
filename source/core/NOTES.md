@@ -279,3 +279,98 @@ bot's cautious play, not a game-tuning change.
 - `player.aiming` can drive reticle/VFX; reload HUD keeps using
   `player.reload_duration`.
 
+---
+
+# v0.5 "Cute & Deadly" — aim assist setting + magnetism (append-only)
+
+Real-hardware feedback: gyro felt bad, text hard to read, and hitting zombies
+was hard. v0.5 helps the shooting (the text/UI and "cuter" art/animation work
+happens in the app/renderer, not the core). Enemy/quest/shop tuning untouched.
+
+## New append-only API (`include/grave.h`)
+
+- `GraveSettings += uint8_t aim_assist;`
+- `GraveAimAssist { OFF=0, NORMAL=1 (default), STRONG=2, COUNT }`
+- `GraveGame += uint8_t aim_assist;` — the active mode mirrored from settings by
+  the app (`game.aim_assist = settings.aim_assist` after load/settings change);
+  `grave_game_init` defaults it to NORMAL and the core sanitises junk values on
+  every use, so an app that never writes it still behaves like NORMAL.
+- `int grave_aim_target(const GraveGame *game);` — read-only reticle query:
+  index of the zombie closest to the aim ray inside the active assist cone,
+  weapon range and with a clear line of fire; -1 otherwise. Requires
+  `player.aiming`, consumes no RNG, changes no state. Renderer should use it to
+  colour/lock the reticle (NORMAL = green-ish, STRONG = brighter) and app UI can
+  show the mode row as OFF / NORMAL / STRONG.
+
+### Persistence
+
+`SaveData.reserved[2]` stores `mode + 1` (so a pre-v0.5 image's zero byte means
+"unset" and loads as NORMAL; OFF saves as 1). Save version stays 3, image stays
+108 B. Junk reserved values sanitise to NORMAL.
+**Fresh settings caveat:** zero-initialised `GraveSettings` means OFF (enum 0),
+so the app must explicitly set `aim_assist = GRAVE_AIM_ASSIST_NORMAL` when it
+creates first-run default settings (the game state itself defaults to NORMAL).
+
+## Aim assist + magnetism (`core_internal.h`)
+
+| constant | value | meaning |
+|---|---|---|
+| `GRAVE_AIM_ASSIST_OFF_RAD` | 0 | OFF: cone hit + magnetism disabled |
+| `GRAVE_AIM_ASSIST_NORMAL_RAD` | 0.06 rad (~3.4°) | NORMAL cone |
+| `GRAVE_AIM_ASSIST_STRONG_RAD` | 0.11 rad (~6.3°) | STRONG cone |
+| `GRAVE_AIM_MAGNET_NORMAL` | 1.6 rad/s | NORMAL magnet angular speed |
+| `GRAVE_AIM_MAGNET_STRONG` | 2.8 rad/s | STRONG magnet angular speed |
+| `GRAVE_HITBOX_RADIUS_SCALE` | 1.20 | zombie body hitscan half-width/depth |
+
+- **Cone assist (firing)**: when aiming and the direct hitscan ray misses, the
+  nearest zombie whose aim point is within the mode's cone of the *actual shot
+  ray*, in weapon range and with prop LOS, is hit as a normal body hit (no
+  headshot bonus). Hip-fire never assists, OFF never assists.
+- **Magnetism**: when aiming and a target is in cone, the core rotates yaw/pitch
+  toward its aim point (chest at `body_height*0.55`) at the mode's angular
+  speed. `player_look` runs first each step, so player touch/gyro input always
+  dominates; the magnet step is capped by the angular error (never overshoots)
+  and scaled by `error / NORMAL_RAD` (0.25..1) so small corrections stay gentle.
+  STRONG is always stronger than NORMAL for the same error.
+- **Hitscan hitbox**: the zombie *body* box half-width/depth is multiplied by
+  `GRAVE_HITBOX_RADIUS_SCALE` (20% wider) in `hitscan()`; the head sphere is
+  untouched, so headshot logic/rate is unchanged. This is the "hits connect
+  more" half of the fix; hip spread was left as-is (sim balance held).
+
+## Verification (v0.5)
+
+- Host tests: **4074 checks, 0 failed** (`-Wall -Wextra -pedantic` clean).
+  New suites: cone radius per mode via `grave_aim_target` (NORMAL vs STRONG vs
+  OFF, behind, out-of-range, LOS-blocked, dying, not-aiming, read-only hash),
+  magnetism convergence/no-overshoot/STRONG>NORMAL/OFF/hip/OFF-player-push,
+  assist firing per mode (NORMAL miss, STRONG hit, OFF miss, hip never),
+  widened hitbox inside/outside cases, aim-assist settings round-trip +
+  pre-v0.5 compat + junk sanitising + core default.
+- 3DS build: clean `build3ds.cmd`, warning-free (see artifact hashes in the final
+  report).
+- Sizes: `GraveGame` **13680 B unchanged** (the byte sits in existing padding);
+  `GraveSettings` 7 B; `SaveData` 108 B unchanged.
+
+### Headless sim (seed 2024, fixed 1/60, bot unchanged except it benefits)
+
+| run | Ashen Mill | Bone Orchard | Old Mine | Campaign | Foreman | End HP |
+|---|---|---|---|---|---|---|
+| with trader | 86.9 s | 166.0 s | 251.1 s | **503.9 s** | spawn 156.4 s, kill 230.5 s (**74.1 s fight**) | 82/140 |
+| `--plain` (no shop) | 86.9 s | 166.0 s | 288.4 s | **541.2 s** | spawn 206.9 s, kill 272.5 s (**65.7 s fight**) | 48/100 |
+
+Both runs clear all 3 zones incl. the Foreman, world_complete = 1,
+cleared [1 1 1], 0 deaths. The wider body box and the boss-duel magnetism make
+the bot land more shots; times stay in the same band as v0.4.
+
+## Front-end notes (engine-3ds / renderer, v0.5)
+
+- After load or changing the settings row:
+  `game.aim_assist = settings.aim_assist;` (values 0/1/2). The core query and
+  magnetism read this mirrored byte.
+- Use `grave_aim_target(&game)` for the reticle: -1 = no target (hip firing,
+  OFF, or nothing in cone), >= 0 = zombie index you can tint by
+  `game.aim_assist`.
+- No other input changes; aim assist only applies while the L aim button is
+  held. Fresh-run default settings should set `GRAVE_AIM_ASSIST_NORMAL`.
+
+

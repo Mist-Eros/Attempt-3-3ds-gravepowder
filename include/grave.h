@@ -377,6 +377,11 @@ typedef struct {
     float     boss_hp;        /* Foreman current hp (UI boss bar)          */
     float     boss_max_hp;    /* Foreman max hp                            */
     bool      world_complete; /* OLD MINE cleared - campaign finished      */
+
+    /* ---- v0.5 additions (append-only) ------------------------------- */
+    /* Active aim-assist mode (GraveAimAssist), mirrored from GraveSettings by
+     * the app.  The core sanitises it on use, so junk is safe. */
+    uint8_t   aim_assist;
 } GraveGame;
 
 /* ------------------------------------------------------------------ */
@@ -500,6 +505,7 @@ typedef struct {
     uint8_t reserved;
     uint8_t gyro_mode;   /* GraveGyroMode: 0 ON (default), 1 OFF, 2 INVERT */
     uint8_t gyro_sens;   /* GraveGyroSens: 0 MED (default), 1 LOW, 2 HIGH */
+    uint8_t aim_assist;  /* GraveAimAssist: 0 OFF, 1 NORMAL (default), 2 STRONG */
 } GraveSettings;
 
 /* sizeof(SaveData); also the exact number of bytes grave_save_to_buffer
@@ -610,5 +616,25 @@ typedef enum {
     GRAVE_GYRO_SENS_HIGH = 2,
     GRAVE_GYRO_SENS_COUNT
 } GraveGyroSens;
+
+/* ================================================================== */
+/* v0.5: aim-assist setting, target query, aim magnetism (append-only) */
+/* ================================================================== */
+
+/* Stored in GraveSettings.aim_assist and mirrored into GraveGame.aim_assist
+ * by the app (the core sanitises junk to NORMAL).  Assist only applies while
+ * the player holds aim; OFF disables both the cone hit and the magnetism. */
+typedef enum {
+    GRAVE_AIM_ASSIST_OFF = 0,     /* no cone assist, no magnetism          */
+    GRAVE_AIM_ASSIST_NORMAL = 1,  /* ~3.4 degree cone (default)            */
+    GRAVE_AIM_ASSIST_STRONG = 2,  /* ~6.3 degree cone, stronger magnetism  */
+    GRAVE_AIM_ASSIST_COUNT
+} GraveAimAssist;
+
+/* Read-only helper for the renderer/UI reticle: index of the zombie closest
+ * to the aim ray that is inside the active assist cone, weapon range and line
+ * of fire, or -1.  Requires player.aiming; consumes no RNG and changes no
+ * state (safe to call every frame). */
+int grave_aim_target(const GraveGame *game);
 
 #endif /* GRAVEPOWDER_H */
