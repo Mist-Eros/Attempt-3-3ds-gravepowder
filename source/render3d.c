@@ -324,6 +324,11 @@ static int s_zombie_clip_attack = -1, s_zombie_clip_hit = -1, s_zombie_clip_deat
 /* frame delta for skinned animation (set once per r3d_draw_world) */
 static float s_draw_dt;
 
+/* v0.4 aim feel: smoothed held-aim blend and entering-aim crosshair flash */
+static float s_aim_blend;   /* 0 = hip, 1 = aiming */
+static float s_aim_pulse;   /* 1 then decays after L is pressed */
+static bool  s_aim_prev;
+
 static C3D_Mtx s_ortho;
 static C3D_Mtx s_last_projection;
 
@@ -1389,7 +1394,7 @@ static void dust_build(const Vec3 *right, const Vec3 *up)
 static void effects_build(const GraveGame *game, const Vec3 *cam_pos,
                           const Vec3 *fwd, const Vec3 *right, const Vec3 *up,
                           Vec3 muzzle, bool muzzle_visible, float muzzle_flash,
-                          float fx_scale)
+                          float fx_scale, float flash_gain)
 {
     int i;
 
@@ -1452,18 +1457,27 @@ static void effects_build(const GraveGame *game, const Vec3 *cam_pos,
     /* drifting dust */
     dust_build(right, up);
 
-    /* muzzle flash: two crossed quads at the muzzle */
+    /* muzzle flash: two crossed quads at the muzzle (flash_gain lets the
+     * musket read a touch punchier than the pistols) */
     if (muzzle_visible && muzzle_flash > 0.001f) {
         float f = clampf(muzzle_flash, 0.0f, 1.0f);
-        float s1 = (0.055f + 0.13f * f) * fx_scale;
+        float gain = clampf(flash_gain, 0.5f, 2.0f);
+        float s1 = (0.055f + 0.13f * f) * fx_scale * gain;
+        float cr = clampf(f * gain, 0.0f, 1.0f);
+        float cg = clampf(0.80f * f * gain, 0.0f, 1.0f);
+        float cb = clampf(0.38f * f * gain, 0.0f, 1.0f);
         Vec3 r2 = v3_norm(v3_add(v3_scale(*right, 0.7071f), v3_scale(*up, 0.7071f)));
         Vec3 u2 = v3_norm(v3_sub(v3_scale(*up, 0.7071f), v3_scale(*right, 0.7071f)));
 
-        dyn_quad(muzzle, *right, *up, s1, s1, 1.0f * f, 0.80f * f, 0.38f * f);
+        dyn_quad(muzzle, *right, *up, s1, s1, cr, cg, cb);
         dyn_quad(muzzle, r2, u2, s1 * 0.72f, s1 * 0.72f,
-                 1.0f * f, 0.92f * f, 0.62f * f);
+                 clampf(f * gain, 0.0f, 1.0f),
+                 clampf(0.92f * f * gain, 0.0f, 1.0f),
+                 clampf(0.62f * f * gain, 0.0f, 1.0f));
         dyn_quad(muzzle, *right, *up, s1 * 0.28f, s1 * 0.28f,
-                 1.0f * f, 1.0f * f, 0.95f * f);
+                 clampf(f * gain, 0.0f, 1.0f),
+                 clampf(f * gain, 0.0f, 1.0f),
+                 clampf(0.95f * f * gain, 0.0f, 1.0f));
     }
 }
 
@@ -1488,25 +1502,48 @@ static void end_additive(void)
 /* crosshair (first person)                                           */
 /* ------------------------------------------------------------------ */
 
+/* Hip reticle is the v0.2 four-arm cross; holding aim tightens the arms,
+ * warms them to gold, grows the centre dot and adds a short entry flash.
+ * Blended by s_aim_blend / s_aim_pulse (updated once per frame). */
 static void draw_crosshair(void)
 {
     /* pixel space: logical top screen is 400 x 240 */
     const float cx = 200.0f, cy = 120.0f;
-    const float gap = 5.0f, len = 9.0f, thick = 1.7f;
+    float aim = clampf(s_aim_blend, 0.0f, 1.0f);
+    float pulse = clampf(s_aim_pulse, 0.0f, 1.0f);
+    float gap = 5.0f - 1.8f * aim;
+    float len = 9.0f - 3.4f * aim;
+    float thick = 1.7f + 0.25f * aim;
+    float arm_r = 0.94f + 0.06f * aim;
+    float arm_g = 0.90f - 0.06f * aim;
+    float arm_b = 0.78f - 0.36f * aim;
+    float dot = 1.4f + 0.9f * aim;
+    float dot_r = 0.95f + 0.05f * aim;
+    float dot_g = 0.55f + 0.35f * aim;
+    float dot_b = 0.35f + 0.20f * aim;
+    float boost = 1.0f + 1.1f * pulse;
+    float grow = 1.0f + 0.30f * pulse;
     Vec3 r = v3(1.0f, 0.0f, 0.0f);
     Vec3 u = v3(0.0f, 1.0f, 0.0f);
     C3D_Mtx identity;
 
+    arm_r = clampf(arm_r * boost, 0.0f, 1.0f);
+    arm_g = clampf(arm_g * boost, 0.0f, 1.0f);
+    arm_b = clampf(arm_b * boost, 0.0f, 1.0f);
+    dot_r = clampf(dot_r * boost, 0.0f, 1.0f);
+    dot_g = clampf(dot_g * boost, 0.0f, 1.0f);
+    dot_b = clampf(dot_b * boost, 0.0f, 1.0f);
+
     dyn_reset();
-    dyn_quad(v3(cx - gap - len * 0.5f, cy, 0.5f), r, u, len * 0.5f, thick * 0.5f,
-             0.94f, 0.90f, 0.78f);
-    dyn_quad(v3(cx + gap + len * 0.5f, cy, 0.5f), r, u, len * 0.5f, thick * 0.5f,
-             0.94f, 0.90f, 0.78f);
-    dyn_quad(v3(cx, cy - gap - len * 0.5f, 0.5f), r, u, thick * 0.5f, len * 0.5f,
-             0.94f, 0.90f, 0.78f);
-    dyn_quad(v3(cx, cy + gap + len * 0.5f, 0.5f), r, u, thick * 0.5f, len * 0.5f,
-             0.94f, 0.90f, 0.78f);
-    dyn_quad(v3(cx, cy, 0.5f), r, u, 1.4f, 1.4f, 0.95f, 0.55f, 0.35f);
+    dyn_quad(v3(cx - gap - len * 0.5f, cy, 0.5f), r, u,
+             len * 0.5f * grow, thick * 0.5f, arm_r, arm_g, arm_b);
+    dyn_quad(v3(cx + gap + len * 0.5f, cy, 0.5f), r, u,
+             len * 0.5f * grow, thick * 0.5f, arm_r, arm_g, arm_b);
+    dyn_quad(v3(cx, cy - gap - len * 0.5f, 0.5f), r, u,
+             thick * 0.5f, len * 0.5f * grow, arm_r, arm_g, arm_b);
+    dyn_quad(v3(cx, cy + gap + len * 0.5f, 0.5f), r, u,
+             thick * 0.5f, len * 0.5f * grow, arm_r, arm_g, arm_b);
+    dyn_quad(v3(cx, cy, 0.5f), r, u, dot * grow, dot * grow, dot_r, dot_g, dot_b);
 
     Mtx_Identity(&identity);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_u_projection, &s_ortho);
@@ -2731,33 +2768,58 @@ static const Vec3 s_gpm_fp_pos[WEAPON_COUNT] = {
 static const float s_gpm_fp_scale[WEAPON_COUNT] = { 0.42f, 0.46f, 0.45f };
 static const float s_gpm_fp_pitch[WEAPON_COUNT] = { 5.0f, 5.0f, 3.0f };
 static const float s_gpm_fp_yaw[WEAPON_COUNT] = { 14.0f, 14.0f, 8.0f };
+/* While aiming the viewmodel comes up and centres: the gun sits nearer the
+ * middle of the screen with the sights close to the reticle, less inward yaw
+ * and (near) level pitch.  Blended by s_aim_blend over the same ~0.1 s. */
+static const Vec3 s_gpm_fp_aim_pos[WEAPON_COUNT] = {
+    { 0.008f, -0.054f, -0.355f },   /* flintlock */
+    { 0.008f, -0.052f, -0.340f },   /* revolver  */
+    { 0.020f, -0.078f, -0.760f },   /* musket    */
+};
+static const float s_gpm_fp_aim_scale[WEAPON_COUNT] = { 0.39f, 0.43f, 0.41f };
+static const float s_gpm_fp_aim_pitch[WEAPON_COUNT] = { 0.8f, 0.8f, 0.6f };
+static const float s_gpm_fp_aim_yaw[WEAPON_COUNT] = { 2.5f, 2.5f, 2.0f };
+
+static float fp_lerp(float hip, float aim, float t)
+{
+    return hip + (aim - hip) * t;
+}
 
 static void draw_first_person_gun_gpm(const GraveGame *game, WeaponId weapon,
                                       Vec3 *muzzle_out)
 {
     const Player *p = &game->player;
     float t = game->zone_time;
-    float sway_x = sinf(t * 1.9f) * 0.005f +
-                   clampf(p->anim_speed, 0.0f, 1.0f) * sinf(p->anim_time * 2.0f) * 0.006f;
-    float sway_y = cosf(t * 1.3f) * 0.004f;
+    float aim = clampf(s_aim_blend, 0.0f, 1.0f);
+    float sway_quiet = 1.0f - 0.75f * aim;
+    float sway_x = (sinf(t * 1.9f) * 0.005f +
+                    clampf(p->anim_speed, 0.0f, 1.0f) *
+                    sinf(p->anim_time * 2.0f) * 0.006f) * sway_quiet;
+    float sway_y = cosf(t * 1.3f) * 0.004f * sway_quiet;
     float recoil = clampf(p->recoil, 0.0f, 0.25f);
     float kick = clampf(p->muzzle_flash / R3D_MUZZLE_FLASH_TIME, 0.0f, 1.0f);
+    float pos_x = fp_lerp(s_gpm_fp_pos[weapon].x, s_gpm_fp_aim_pos[weapon].x, aim);
+    float pos_y = fp_lerp(s_gpm_fp_pos[weapon].y, s_gpm_fp_aim_pos[weapon].y, aim);
+    float pos_z = fp_lerp(s_gpm_fp_pos[weapon].z, s_gpm_fp_aim_pos[weapon].z, aim);
+    float fscale = s_gpm_gun_scale[weapon] *
+                   fp_lerp(s_gpm_fp_scale[weapon], s_gpm_fp_aim_scale[weapon], aim);
+    float fpitch = fp_lerp(s_gpm_fp_pitch[weapon], s_gpm_fp_aim_pitch[weapon], aim);
+    float fyaw = fp_lerp(s_gpm_fp_yaw[weapon], s_gpm_fp_aim_yaw[weapon], aim);
     C3D_Mtx model;
 
     Mtx_Identity(&model);
     Mtx_Translate(&model,
-                  s_gpm_fp_pos[weapon].x + sway_x,
-                  s_gpm_fp_pos[weapon].y + sway_y,
-                  s_gpm_fp_pos[weapon].z + recoil * 0.5f + kick * 0.02f, true);
+                  pos_x + sway_x,
+                  pos_y + sway_y,
+                  pos_z + recoil * 0.5f * (1.0f - 0.4f * aim) +
+                  kick * 0.02f * (1.0f - 0.5f * aim), true);
     /* camera-space aim first, then yaw the (muzzle +Z) model away from the
      * camera: T * Rx * Ry(180 + yaw) * Rz * S */
-    Mtx_RotateX(&model, deg2rad(s_gpm_fp_pitch[weapon]) + recoil * 1.6f +
-                         kick * 0.1f, true);
-    Mtx_RotateY(&model, deg2rad(180.0f + s_gpm_fp_yaw[weapon]), true);
+    Mtx_RotateX(&model, deg2rad(fpitch) + recoil * 1.6f * (1.0f - 0.35f * aim) +
+                         kick * 0.1f * (1.0f - 0.5f * aim), true);
+    Mtx_RotateY(&model, deg2rad(180.0f + fyaw), true);
     Mtx_RotateZ(&model, sway_x * 0.6f, true);
-    Mtx_Scale(&model, s_gpm_gun_scale[weapon] * s_gpm_fp_scale[weapon],
-              s_gpm_gun_scale[weapon] * s_gpm_fp_scale[weapon],
-              s_gpm_gun_scale[weapon] * s_gpm_fp_scale[weapon]);
+    Mtx_Scale(&model, fscale, fscale, fscale);
     C3D_CullFace(GPU_CULL_NONE);
     draw_gpm_gun(&model, weapon, 0.18f);
     C3D_CullFace(GPU_CULL_BACK_CCW);
@@ -2868,7 +2930,8 @@ static void draw_world_geometry(const GraveGame *game, const C3D_Mtx *view,
         float flash = clampf(game->player.muzzle_flash / R3D_MUZZLE_FLASH_TIME,
                              0.0f, 1.0f);
         effects_build(game, cam_pos, fwd, right, up, muzzle,
-                      flash > 0.0f, flash, first_person ? 0.30f : 1.0f);
+                      flash > 0.0f, flash, first_person ? 0.30f : 1.0f,
+                      weapon == WEAPON_MUSKET ? 1.35f : 1.0f);
     }
     zone_glow_build(game, view, right, up);
     begin_additive();
@@ -3158,6 +3221,9 @@ void r3d_init(void)
     for (i = 0; i < R3D_MAX_PUFFS; i++)
         s_puffs[i].active = false;
     s_title_clock = 0.0f;
+    s_aim_blend = 0.0f;
+    s_aim_pulse = 0.0f;
+    s_aim_prev = false;
     s_initialized = true;
 }
 
@@ -3268,6 +3334,32 @@ void r3d_set_stereo(float iod, bool enabled)
 /* r3d_draw_world                                                     */
 /* ------------------------------------------------------------------ */
 
+/* v0.4: reads core's held-aim flag and smooths the renderer's aim blend.
+ * Called once per frame (not per eye) from r3d_draw_world. */
+static void r3d_update_aim(const GraveGame *game, bool title, float dt)
+{
+    bool aiming = false;
+    float target, k;
+
+    if (!title && game != NULL && game->player.alive)
+        aiming = game->player.aiming;
+
+    if (aiming && !s_aim_prev)
+        s_aim_pulse = 1.0f;
+    s_aim_prev = aiming;
+
+    target = aiming ? 1.0f : 0.0f;
+    k = clampf(dt * 12.0f, 0.0f, 1.0f);   /* ~0.08-0.10 s to settle */
+    s_aim_blend += (target - s_aim_blend) * k;
+    if (s_aim_blend < 0.001f)
+        s_aim_blend = 0.0f;
+    else if (s_aim_blend > 0.999f)
+        s_aim_blend = 1.0f;
+
+    s_aim_pulse -= dt / 0.14f;            /* entry flash decays in 140 ms */
+    if (s_aim_pulse < 0.0f)
+        s_aim_pulse = 0.0f;
+}
 static void build_projection(C3D_Mtx *projection, float fov_deg, float iod)
 {
     float fovy = C3D_AngleFromDegrees(fov_deg);
@@ -3310,6 +3402,7 @@ void r3d_draw_world(const GraveGame *game, float dt)
     if (title)
         s_title_clock += dt;
     r3d_zone_select(title || game == NULL ? ZONE_ASHEN_MILL : game->zone);
+    r3d_update_aim(game, title, dt);
 
     /* camera */
     if (title) {
