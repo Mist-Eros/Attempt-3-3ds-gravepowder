@@ -1,7 +1,7 @@
 # Attempt 3: Gravepowder for the 3DS
 
 A 3D zombie shooter for the Nintendo 3DS, built from scratch in C. Anthro wolf gunslinger, flintlock-era
-iron, shambling rot, and a valley split into zones you clear one dusty yard at a time.
+iron, shambling rot, and a valley split into zones you clear one dusty yard — and one haunted mine — at a time.
 
 This is the follow-up to [Elemental Defense](https://github.com/Mist-Eros/Attempt-2-3ds-game) (the
 maze-building tower defense I ported to the 3DS last time). Same approach, harder problem: real 3D on
@@ -23,43 +23,62 @@ The valley is split into **zones**, Borderlands-style. Each zone has a job: clea
 bring back a material the survivors need. Zombies drop old coins, rot sinew and (in the orchard) bone
 charms — those are what the quests ask for. Clear the job, unlock the next zone, walk on.
 
-**v0.2 — the valley opens up:**
+**The campaign:**
 
-- **ASHEN MILL** — the walled mill yard from v0.1. Kill 40 of the rot, bring back 8 old coins and 4
-  rot sinew.
+- **ASHEN MILL** — the walled mill yard. Kill 40 of the rot, bring back 8 old coins and 4 rot sinew.
 - **BONE ORCHARD** — a dense graveyard (143 props), runner-heavy waves with a brute every wave. Kill
   55, bring back 10 old coins and 6 bone charms.
-- **OLD MINE** — unlocks after the orchard, stub zone for now (same layout, higher kill goal).
-- **World map travel**: clear a zone, then travel between zones from the WORLD page. Progress,
-  materials, owned guns and settings are saved to the SD card (`save.bin`), so the valley remembers.
+- **OLD MINE** — a proper mine-works finale: timber adits, ore glows, carts and lanterns in low amber
+  fog. Kill 45, bring back 8 old coins and 3 bone charms... and survive **the Foreman**, a 2.8 m boss
+  with 1680 HP that bursts out of the dark once you've put down 40 of his crew.
+- **The Trader** waits at the trailhead. Old coins, rot sinew and bone charms finally have a sink:
+  ammo refills, per-gun damage tunes, max HP, faster reloads, medkits.
+- **World map travel**: clear a zone, then travel between zones from the WORLD page. Progress, materials,
+  owned guns, shop upgrades and settings are saved to the SD card (`save.bin` v3), so the valley
+  remembers — the title screen offers CONTINUE or NEW GAME.
 
 Two camera modes: **third person** (default — you see the wolf, coat, tail and the gun at his hip) and
 **first person**, toggled with Y or in settings.
 
 ### Screens
 
-| Title | Third person | First person |
+| Title (CONTINUE) | Old Mine, third person | Old Mine, first person |
 |---|---|---|
 | ![title](docs/screenshots/title.png) | ![third person](docs/screenshots/gameplay.png) | ![first person](docs/screenshots/firstperson.png) |
 
-| Firing | Area map | World map |
+| Mine area map | World map | Inventory |
 |---|---|---|
-| ![fire](docs/screenshots/fire.png) | ![area map](docs/screenshots/area.png) | ![world map](docs/screenshots/world.png) |
+| ![area map](docs/screenshots/area.png) | ![world map](docs/screenshots/world.png) | ![inventory](docs/screenshots/pack.png) |
 
-| Inventory | Pause |
+| The Trader (offline UI render) | The Foreman (offline render) | Ending |
+|---|---|---|
+| ![shop](docs/screenshots/shop.png) | ![boss](docs/screenshots/boss.png) | ![ending](docs/screenshots/ending.png) |
+
+| Pause | Wardrobe / model swap |
 |---|---|
-| ![inventory](docs/screenshots/pack.png) | ![pause](docs/screenshots/pause.png) |
+| ![pause](docs/screenshots/pause.png) | ![wardrobe](docs/screenshots/wardrobe.png) |
+
+(The title, mine, maps, inventory, pause and wardrobe shots are emulator captures. The Trader, Foreman
+and ending pages are rendered offline from the game's own draw lists because reaching them on the
+emulator needs a full playthrough — the 3D backgrounds are real renderer captures.)
 
 ## The bottom screen is a paged info screen
 
 Top screen is the 3D gameplay. Bottom screen has a slim always-on strip (health/stamina, weapon/ammo,
-pause) plus three tabs — touch them, or press **Select** to cycle:
+reload bar, pause) plus **four tabs** — touch them, or press **Select** to cycle:
 
-- **AREA** — top-down map of the current zone: props, walls, gate, your facing arrow, live zombie
-  blips, loot dots, objective marker, quest progress.
-- **WORLD** — the valley: zone nodes with locked/cleared/current state, best times, materials summary;
-  tap an unlocked zone to travel there.
-- **PACK** — inventory: weapon cards with stats and ammo (tap to equip), materials, character sheet.
+- **AREA** — top-down map of the current zone: all props (timber, carts, ore, lanterns...), walls, gate,
+  your facing arrow, live zombie blips (boss is a bigger red blip), loot dots, objective + quest progress.
+- **WORLD** — the valley: zone nodes with locked/cleared/current state, NEW badges, best times, material
+  summary; tapping an unlocked zone opens a travel confirmation instead of teleporting.
+- **PACK** — inventory: weapon cards with stats/ammo (tap to equip), materials, character sheet with
+  accuracy, lifetime kills, zone runs.
+- **SHOP** — the Trader's catalog (only buyable at the trailhead): ammo, three gun tunes, vitality,
+  quick hands, medkits; BUY/MAXED/LOCKED states, wallet in the header.
+
+**Wardrobe** (pause menu) shows where each model came from (SD card / embedded / procedural fallback)
+and reloads all models from the SD card in one tap — the in-game door for swapping models.
+When the Foreman is on the field a three-segment boss bar is pinned to the bottom edge.
 
 ## Playing it
 
@@ -80,7 +99,7 @@ in `/3ds/` on your SD card, launch it from the Homebrew Launcher. Needs a 3DS wi
 | Y | toggle first / third person |
 | L | sprint |
 | Select | cycle bottom-screen pages |
-| Touch tabs | switch pages / tap nodes, weapon cards, buttons |
+| Touch tabs | switch pages / tap nodes, weapon cards, shop items, buttons |
 | Start | pause / resume |
 
 Playing under an emulator (Azahar)? Arrow keys = circle pad, WASD = d-pad, **U/H/J/K** = X/Y/B/A,
@@ -139,16 +158,18 @@ tints. Full format + workflow in [`docs/assets.md`](docs/assets.md) and
 
 ## Status
 
-v0.2 is playable end-to-end: two real zones + a stub third, zone travel, save file, animated models
-both camera modes, paged touch screen with maps and inventory, original music/SFX.
+v0.3 is the complete campaign: three zones (Ashen Mill, Bone Orchard, Old Mine), the Foreman boss
+fight, the Trader's shop, save v3 with CONTINUE/NEW GAME and an erase-save page, the WARDROBE model
+swap page, four-tab touch UI with per-zone AREA maps, accuracy tracking and a proper ending. 57 fps
+in every measured scene, animated models in both camera modes, original music/SFX.
 
 Still to do:
 
-- [ ] real-hardware playtest of v0.2 (3D, touch aim, model animation, audio)
-- [ ] OLD MINE as a proper zone with a boss-ish brute, then an ending
-- [ ] shop / gun upgrades between zones; accounter for shots fired (accuracy stat)
-- [ ] more model swapping: the user's own anthro model, weapon variants
-- [ ] performance polish: zombie LOD tuning, draw-call budget in the orchard
+- [ ] real-hardware playtest of v0.3 (3D, touch aim, model animation, audio, shop loop)
+- [ ] bring your own wolf model (the WARDROBE page + GPM pipeline are the swap path)
+- [ ] weapon variants / more guns; boss attack variety
+- [ ] optional post-game endless mode beyond the mine
+- [ ] performance headroom: skinned-vertex budget is the limit in dense mine fights
 
 ## Building it
 
@@ -164,8 +185,9 @@ committed, so a normal build needs no Python; only re-converting models does (se
 and the headless campaign sim:
 
 ```sh
-make -C tests CC=cc test     # 3265 checks
-make -C tools CC=cc run     # bot clears Ashen Mill + Bone Orchard
+make -C tests CC=cc test     # 3958 checks
+make -C tools CC=cc run     # bot clears all 3 zones incl. the Foreman
+make -C tools/preview CC=cc run  # offline UI page tour + layout/legibility check
 ```
 
 Every push and every `v*` tag builds it in GitHub Actions.
@@ -186,12 +208,13 @@ source/gpm.c         GPM model loader (embedded or SD override)
 source/skin.c        rigid-bone CPU skinning, clip sampling, crossfade, LOD
 source/mesh.c        procedural fallback meshes + wolf head/tail attachments, props, effects
 source/render3d.c    citro3d world rendering, camera, lighting, particles
-source/ui.c          citro2d paged bottom screen (strip + AREA/WORLD/PACK)
+source/ui.c          citro2d paged bottom screen (strip + AREA/WORLD/PACK/SHOP + pause pages)
 source/app.c         scene state machine, input, save I/O, audio dispatch
 source/main.c        aptMainLoop frame loop (fixed 60 Hz)
 source/audio*.c      portable fallback + libctru ndsp mixer
 assets/              free CC0/CC-BY model sources + conversion configs + licences
 tools/               importer, selftest, asset convert/install scripts, audio synth, sim
+tools/preview/       host page-tour harness for ui/app (draw-list replay + layout checks)
 tests/               host unit tests
 ```
 

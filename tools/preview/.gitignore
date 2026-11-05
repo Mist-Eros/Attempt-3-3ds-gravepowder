@@ -1,0 +1,12 @@
+# preview harness build/run artifacts (the repo root .gitignore already covers
+# the classic names; keep the harness self-cleaning too)
+preview.exe
+preview.pdb
+*.exe
+*.o
+*.d
+out/
+out_zoom/
+preview_run.log
+SCREENSHOTS.md
+__pycache__/
