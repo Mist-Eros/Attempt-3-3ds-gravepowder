@@ -75,12 +75,15 @@ static void app_save(void)
     /* atomic-ish replace: a crash mid-write leaves the previous save intact */
     remove(SAVE_PATH);
     rename(SAVE_TMP, SAVE_PATH);
+    g_app.has_save = true;
 #else
     /* host harness: no SD card, nothing to persist */
 #endif
 }
 
-static void app_load(void)
+/* Loads the save file (if any).  Returns true when a valid v3 image was
+ * applied; the title screen uses that as "CONTINUE is available". */
+static bool app_load(void)
 {
 #ifdef __3DS__
     App *a = &g_app;
@@ -90,26 +93,76 @@ static void app_load(void)
     size_t got;
 
     if (size <= 0 || size > GRAVE_SAVE_SIZE)
-        return;
+        return false;
     f = fopen(SAVE_PATH, "rb");
     if (f == NULL)
-        return;
+        return false;
     got = fread(buf, 1, sizeof(buf), f);
     fclose(f);
     if ((int)got != size)
-        return; /* truncated/oversized: keep the fresh init */
+        return false; /* truncated/oversized: keep the fresh init */
     if (!grave_load_from_buffer(&a->game, &a->settings, buf, size)) {
-        /* corrupt/old save: keep the fresh init, do not overwrite it here */
+        /* corrupt / older-version save: keep the fresh init but remember that
+         * a file is present so NEW GAME can erase it. */
         a->settings.invert_y = 0;
         a->settings.touch_sens = (uint8_t)APP_SENS_MED;
         a->settings.muted = 0;
         a->settings.reserved = 0;
-        return;
+        return false;
     }
     audio_set_muted(a->settings.muted != 0);
+    return true;
 #else
     /* host harness: always start fresh */
+    return false;
 #endif
+}
+
+static void app_set_toast(App *a, const char *msg)
+{
+    snprintf(a->toast, sizeof(a->toast), "%s", msg);
+    a->toast_timer = 2.4f;
+}
+
+static uint32_t unlocked_mask(const GraveGame *g)
+{
+    uint32_t m = 0u;
+    int i;
+
+    for (i = 0; i < ZONE_COUNT; i++)
+        if (g->world.nodes[i].unlocked)
+            m |= 1u << (unsigned)i;
+    return m;
+}
+
+/* Erases the save file and resets the front end + core to a fresh campaign.
+ * NEW GAME (title), ERASE SAVE (save sub-page) and the ending's PLAY AGAIN all
+ * funnel through here so progress can never half-survive an erase. */
+static void app_delete_save(void)
+{
+    App *a = &g_app;
+
+#ifdef __3DS__
+    remove(SAVE_PATH);
+    remove(SAVE_TMP);
+#endif
+    a->has_save = false;
+    a->save_erase_armed = false;
+    a->settings.invert_y = 0;
+    a->settings.touch_sens = (uint8_t)APP_SENS_MED;
+    a->settings.muted = 0;
+    a->settings.reserved = 0;
+    grave_game_init(&a->game, a->seed++);
+    grave_input_reset(&a->input);
+    a->known_unlock_mask = unlocked_mask(&a->game);
+    a->new_zone_mask = 0u;
+    a->travel_confirm_zone = -1;
+    a->last_weapon = (int)a->game.player.weapon;
+    a->prev_hp = a->game.player.hp;
+    a->music = GRAVE_MUSIC_NONE;
+    audio_set_muted(false);
+    audio_set_weapon(a->last_weapon);
+    app_set_toast(a, "SAVE ERASED");
 }
 
 /* ------------------------------------------------------------------ */
@@ -125,6 +178,10 @@ static void show_tab(App *a, AppTab tab)
     a->tab_prev = a->tab;
     a->tab = tab;
     a->tab_anim = UI_TAB_TRANSITION_TIME;
+    /* NEW badges are app-local and clear once the maps have been viewed:
+     * leaving WORLD/AREA clears them (they are visible while you look). */
+    if (tab != APP_TAB_WORLD && tab != APP_TAB_AREA)
+        a->new_zone_mask = 0u;
 }
 
 static void cycle_tab(App *a)
@@ -133,6 +190,8 @@ static void cycle_tab(App *a)
 }
 
 /* Which zone the title screen's START should enter. */
+ZoneId app_title_target_zone(const App *app);
+
 static ZoneId title_target_zone(const App *a)
 {
     ZoneId z = a->game.world.current;
@@ -142,6 +201,11 @@ static ZoneId title_target_zone(const App *a)
     if (!a->game.world.nodes[z].unlocked)
         z = ZONE_ASHEN_MILL;
     return z;
+}
+
+ZoneId app_title_target_zone(const App *app)
+{
+    return title_target_zone(app);
 }
 
 /* Enters a zone through the core's unlock-respecting travel helper. */
@@ -160,6 +224,12 @@ static bool enter_zone(App *a, ZoneId zone)
     a->tab = APP_TAB_AREA;
     a->tab_prev = APP_TAB_AREA;
     a->tab_anim = 0.0f;
+    a->new_zone_mask &= ~(1u << (unsigned)zone);
+    /* v0.3: remember the material bank on entry; the clear card shows the
+     * quest payout as the difference (core grants it on completion). */
+    a->zone_start_coins = a->game.material_coins;
+    a->zone_start_sinew = a->game.material_sinew;
+    a->zone_start_charms = a->game.material_bone_charms;
     return true;
 }
 
@@ -197,6 +267,15 @@ static void capture_results(App *a, AppPage page)
     a->result_kills = a->game.zombies_killed;
     a->result_coins = a->game.material_coins;
     a->result_sinew = a->game.material_sinew;
+    a->result_gain_coins = a->game.material_coins - a->zone_start_coins;
+    a->result_gain_sinew = a->game.material_sinew - a->zone_start_sinew;
+    a->result_gain_charms = a->game.material_bone_charms - a->zone_start_charms;
+    if (a->result_gain_coins < 0)
+        a->result_gain_coins = 0;
+    if (a->result_gain_sinew < 0)
+        a->result_gain_sinew = 0;
+    if (a->result_gain_charms < 0)
+        a->result_gain_charms = 0;
     a->page = page;
     a->paused = false;
     app_save();
@@ -263,11 +342,107 @@ static void apply_action(App *a, int action, int arg)
                 break;
             }
             if (grave_world_unlocked(&a->game, zone))
-                enter_zone(a, zone);
+                a->travel_confirm_zone = (int)zone;
         }
         break;
     case UI_ACTION_TRAVEL_ON:
         go_to_world_map(a);
+        break;
+    case UI_ACTION_TITLE_CONTINUE:
+        if (a->page == APP_PAGE_TITLE && a->has_save)
+            enter_zone(a, title_target_zone(a));
+        break;
+    case UI_ACTION_TITLE_NEW_GAME:
+        if (a->page == APP_PAGE_TITLE)
+            a->page = APP_PAGE_TITLE_CONFIRM;
+        break;
+    case UI_ACTION_NEW_GAME_YES:
+        if (a->page == APP_PAGE_TITLE_CONFIRM) {
+            app_delete_save();
+            enter_zone(a, ZONE_ASHEN_MILL);
+        }
+        break;
+    case UI_ACTION_CANCEL:
+        if (a->page == APP_PAGE_TITLE_CONFIRM) {
+            a->page = APP_PAGE_TITLE;
+        } else {
+            a->save_erase_armed = false;
+        }
+        break;
+    case UI_ACTION_WARDROBE:
+        if (a->page == APP_PAGE_PAUSE)
+            a->page = APP_PAGE_WARDROBE;
+        break;
+    case UI_ACTION_WARDROBE_RELOAD:
+        if (a->page == APP_PAGE_WARDROBE) {
+            a->wardrobe_reload_ok = r3d_reload_all_models();
+            a->wardrobe_flash = 2.5f;
+            app_set_toast(a, a->wardrobe_reload_ok ? "MODELS RELOADED"
+                                                   : "RELOAD FAILED - FALLBACK");
+        }
+        break;
+    case UI_ACTION_WARDROBE_BACK:
+        if (a->page == APP_PAGE_WARDROBE)
+            a->page = APP_PAGE_PAUSE;
+        break;
+    case UI_ACTION_SETTINGS_SAVE:
+        if (a->page == APP_PAGE_SETTINGS) {
+            a->save_erase_armed = false;
+            a->page = APP_PAGE_SAVE;
+        }
+        break;
+    case UI_ACTION_SAVE_BACK:
+        if (a->page == APP_PAGE_SAVE) {
+            a->save_erase_armed = false;
+            a->page = APP_PAGE_SETTINGS;
+        }
+        break;
+    case UI_ACTION_SAVE_ERASE:
+        if (a->page == APP_PAGE_SAVE) {
+            if (!a->save_erase_armed) {
+                a->save_erase_armed = true;
+                app_set_toast(a, "TAP AGAIN TO ERASE");
+            } else {
+                app_delete_save();
+                a->page = APP_PAGE_TITLE;
+                a->paused = false;
+            }
+        }
+        break;
+    case UI_ACTION_SHOP_ITEM:
+        if (arg >= 0 && arg < SHOP_ITEM_COUNT &&
+            grave_shop_can_buy(&a->game, (ShopItem)arg)) {
+            const ShopItemSpec *spec = grave_shop_item((ShopItem)arg);
+
+            if (grave_shop_buy(&a->game, (ShopItem)arg)) {
+                audio_play_event(GRAVE_EVT_PICKUP);
+                if (spec != NULL)
+                    app_set_toast(a, spec->name);
+                else
+                    app_set_toast(a, "PURCHASED");
+                app_save();
+            }
+        } else {
+            app_set_toast(a, "CANNOT BUY THAT");
+        }
+        break;
+    case UI_ACTION_TRAVEL_YES:
+        if (a->travel_confirm_zone >= 0 &&
+            a->travel_confirm_zone < ZONE_COUNT) {
+            ZoneId z = (ZoneId)a->travel_confirm_zone;
+
+            a->travel_confirm_zone = -1;
+            enter_zone(a, z);
+        }
+        break;
+    case UI_ACTION_TRAVEL_NO:
+        a->travel_confirm_zone = -1;
+        break;
+    case UI_ACTION_ENDING_PLAY:
+        if (a->page == APP_PAGE_ZONE_CLEAR && a->game.world_complete) {
+            app_delete_save();
+            enter_zone(a, ZONE_ASHEN_MILL);
+        }
         break;
     case UI_ACTION_TOGGLE_CAMERA:
         a->game.player.camera_first_person = !a->game.player.camera_first_person;
@@ -302,7 +477,7 @@ static void update_music(App *a)
 {
     GraveMusic want;
 
-    if (a->page == APP_PAGE_TITLE ||
+    if (a->page == APP_PAGE_TITLE || a->page == APP_PAGE_TITLE_CONFIRM ||
         (a->page == APP_PAGE_HUD && !a->game.world.in_zone))
         want = GRAVE_MUSIC_MENU;
     else if (a->page == APP_PAGE_ZONE_CLEAR || a->page == APP_PAGE_GAME_OVER)
@@ -351,7 +526,14 @@ void app_init(void)
     /* fresh core state (TITLE phase, trail mode), then overlay the save */
     grave_game_init(&a->game, a->seed);
     a->seed++;
-    app_load();
+    a->has_save = app_load();
+    a->known_unlock_mask = unlocked_mask(&a->game);
+    a->new_zone_mask = 0u;
+    a->travel_confirm_zone = -1;
+    a->save_erase_armed = false;
+    a->toast_timer = 0.0f;
+    a->wardrobe_reload_ok = false;
+    a->wardrobe_flash = 0.0f;
     a->last_weapon = (int)a->game.player.weapon;
     grave_input_reset(&a->input);
     a->prev_hp = a->game.player.hp;
@@ -433,7 +615,7 @@ void app_poll_input(void)
             if (!a->touch_dragging && a->touch_travel > 10.0f)
                 a->touch_dragging = true;
             if (a->touch_dragging && a->page == APP_PAGE_HUD &&
-                a->game.world.in_zone) {
+                a->game.world.in_zone && a->travel_confirm_zone < 0) {
                 a->look_accum_x += (float)ddx * sensScale / 160.0f;
                 a->look_accum_y += (a->settings.invert_y ? -(float)ddy : (float)ddy) *
                                    sensScale / 160.0f;
@@ -455,8 +637,12 @@ void app_poll_input(void)
     }
 
     /* ---------------- menu / pause button shortcuts ---------------- */
-    if ((down & KEY_SELECT) != 0 && a->page == APP_PAGE_HUD)
-        cycle_tab(a);
+    if ((down & KEY_SELECT) != 0) {
+        if (a->page == APP_PAGE_HUD)
+            cycle_tab(a);
+        else if (a->page == APP_PAGE_TITLE && a->has_save)
+            a->page = APP_PAGE_TITLE_CONFIRM;
+    }
 
     if ((down & KEY_START) != 0) {
         switch (a->page) {
@@ -474,6 +660,15 @@ void app_poll_input(void)
             break;
         case APP_PAGE_SETTINGS:
             a->page = APP_PAGE_PAUSE;
+            break;
+        case APP_PAGE_SAVE:
+            a->page = APP_PAGE_SETTINGS;
+            break;
+        case APP_PAGE_WARDROBE:
+            a->page = APP_PAGE_PAUSE;
+            break;
+        case APP_PAGE_TITLE_CONFIRM:
+            a->page = APP_PAGE_TITLE;
             break;
         case APP_PAGE_ZONE_CLEAR:
         case APP_PAGE_GAME_OVER:
@@ -502,6 +697,32 @@ void app_poll_input(void)
         case APP_PAGE_SETTINGS:
             a->page = APP_PAGE_PAUSE;
             break;
+        case APP_PAGE_TITLE_CONFIRM:
+            apply_action(a, UI_ACTION_NEW_GAME_YES, 0);
+            break;
+        case APP_PAGE_WARDROBE:
+            apply_action(a, UI_ACTION_WARDROBE_RELOAD, 0);
+            break;
+        case APP_PAGE_SAVE:
+            a->page = APP_PAGE_SETTINGS;
+            break;
+        default:
+            break;
+        }
+    }
+
+    /* overlay pages use B as their back/cancel button (in play B is reload) */
+    if ((down & KEY_B) != 0) {
+        switch (a->page) {
+        case APP_PAGE_TITLE_CONFIRM:
+            a->page = APP_PAGE_TITLE;
+            break;
+        case APP_PAGE_WARDROBE:
+            a->page = APP_PAGE_PAUSE;
+            break;
+        case APP_PAGE_SAVE:
+            a->page = APP_PAGE_SETTINGS;
+            break;
         default:
             break;
         }
@@ -526,6 +747,27 @@ void app_step(void)
         a->tab_anim -= FIXED_DT;
         if (a->tab_anim < 0.0f)
             a->tab_anim = 0.0f;
+    }
+    if (a->toast_timer > 0.0f) {
+        a->toast_timer -= FIXED_DT;
+        if (a->toast_timer < 0.0f)
+            a->toast_timer = 0.0f;
+    }
+    if (a->wardrobe_flash > 0.0f) {
+        a->wardrobe_flash -= FIXED_DT;
+        if (a->wardrobe_flash < 0.0f)
+            a->wardrobe_flash = 0.0f;
+    }
+
+    /* App-local WORLD NEW badges: a zone that just unlocked is flagged until
+     * the player views the maps (cleared in show_tab / enter_zone). */
+    {
+        uint32_t um = unlocked_mask(&a->game);
+        uint32_t fresh = um & ~a->known_unlock_mask;
+
+        if (fresh != 0u)
+            a->new_zone_mask |= fresh;
+        a->known_unlock_mask = um;
     }
 
     if (a->page == APP_PAGE_HUD && a->game.world.in_zone) {

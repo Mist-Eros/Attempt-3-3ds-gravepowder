@@ -18,9 +18,12 @@
  * behind the pause/result pages (the renderer is phase-agnostic). */
 typedef enum {
     APP_PAGE_TITLE = 0,
+    APP_PAGE_TITLE_CONFIRM, /* "start a new game? this erases your save"  */
     APP_PAGE_HUD,
     APP_PAGE_PAUSE,
     APP_PAGE_SETTINGS,
+    APP_PAGE_SAVE,          /* settings -> save & progress sub-page       */
+    APP_PAGE_WARDROBE,      /* pause -> model sources / reload models     */
     APP_PAGE_ZONE_CLEAR,
     APP_PAGE_GAME_OVER
 } AppPage;
@@ -38,6 +41,7 @@ typedef enum {
     APP_TAB_AREA = 0,   /* top-down map of the current zone            */
     APP_TAB_WORLD,      /* valley map / zone nodes                     */
     APP_TAB_PACK,       /* weapons, materials, character stats         */
+    APP_TAB_SHOP,       /* trailhead trader (only on the trail)        */
     APP_TAB_COUNT
 } AppTab;
 
@@ -75,11 +79,30 @@ struct App {
      * core save buffer serialises, so it is the single source of truth. */
     GraveSettings settings;  /* invert_y, touch_sens, muted, reserved   */
 
-    /* Result snapshot so the zone-clear page keeps its numbers. */
+    /* Result snapshot so the zone-clear page keeps its numbers.  The gain
+     * fields are (materials at clear - materials at zone entry), so the card
+     * can show the quest payout line without duplicating core math. */
     float result_time;
     int result_kills;
     int result_coins;
     int result_sinew;
+    int result_gain_coins;
+    int result_gain_sinew;
+    int result_gain_charms;
+    int zone_start_coins;
+    int zone_start_sinew;
+    int zone_start_charms;
+
+    /* v0.3 front-end state. */
+    bool has_save;           /* a valid save file was loaded at boot       */
+    bool save_erase_armed;   /* save sub-page: first erase tap done        */
+    uint32_t new_zone_mask;  /* app-local, non-persisted WORLD NEW badges  */
+    uint32_t known_unlock_mask; /* previous frame unlock state (edge detect) */
+    int travel_confirm_zone; /* >= 0: travel dialog is open for that zone  */
+    char toast[48];          /* transient bottom-screen feedback line      */
+    float toast_timer;
+    bool wardrobe_reload_ok; /* result of the last r3d_reload_all_models() */
+    float wardrobe_flash;    /* timer for the reload status line           */
 
     /* Audio bookkeeping. */
     GraveMusic music;
@@ -97,5 +120,9 @@ struct App {
  * page currently shown. */
 void ui_draw(const App *app);
 bool ui_hit_test(const App *app, int px, int py, int *action, int *arg);
+
+/* Zone the title screen CONTINUE will actually enter (same helper the app
+ * action uses; ui.c prints it so the button label can never lie). */
+ZoneId app_title_target_zone(const App *app);
 
 #endif /* GRAVEPOWDER_APP_INTERNAL_H */
