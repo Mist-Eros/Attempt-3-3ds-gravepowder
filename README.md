@@ -42,13 +42,21 @@ Two camera modes: **third person** (default — you see the wolf, coat, tail and
 
 ### Screens
 
-| Title (CONTINUE) | Old Mine, third person | Old Mine, first person |
+| Title (simplified) | Old Mine, third person | Old Mine, first person |
 |---|---|---|
 | ![title](docs/screenshots/title.png) | ![third person](docs/screenshots/gameplay.png) | ![first person](docs/screenshots/firstperson.png) |
 
 | Aiming, first person | Aiming, third person | Firing while aimed |
 |---|---|---|
 | ![aim fp](docs/screenshots/aim_fp.png) | ![aim tp](docs/screenshots/aim_tp.png) | ![fire](docs/screenshots/fire.png) |
+
+| Aim-assist lock (reticle goes red) | Hitmarker | Zombies glow-eyed in the dark mine |
+|---|---|---|
+| ![reticle lock](docs/screenshots/reticle_locked.png) | ![hitmarker](docs/screenshots/hitmarker.png) | ![mine crowd](docs/screenshots/mine_crowd.png) |
+
+| Bone Orchard fireflies | | |
+|---|---|---|
+| ![fireflies](docs/screenshots/fireflies.png) | | |
 
 | Mine area map | World map | Inventory |
 |---|---|---|
@@ -84,6 +92,20 @@ reload bar, pause) plus **four tabs** — touch them, or press **Select** to cyc
 and reloads all models from the SD card in one tap — the in-game door for swapping models.
 When the Foreman is on the field a three-segment boss bar is pinned to the bottom edge.
 
+### v0.5: readable, cute, animation everywhere
+
+Real-hardware feedback drove a UI/polish pass: the title and pause screens are now **one control line**
+(`L AIM  R FIRE  A RELOAD  B SPRINT  START PAUSE`), the bottom pages were rewritten around **big labels**
+(important text ≥0.40 scale instead of tiny 0.22–0.32 micro-copy; an automated readability check counts
+25 remaining sub-0.34 meta labels vs 102 before), and the pages lost their redundant captions. A little
+procedural **ghost-pup mascot** lives in the corner of the HUD: it bobs and blinks, bounces with sparkles
+when you kill or pick something up, shivers/sweats when you get hit and goes pale at low HP. Tabs spring,
+buttons squash, toasts bounce, banners pop in, materials count up and the low-HP heart pulses.
+
+In the world: mine **embers**, Bone Orchard **fireflies**, stronger lantern flicker, revolver/musket **shell
+casings**, per-zombie idle sway, death dissolve + sparkle puff, heart sparkles on pickups, and glowing eyes
+on every zombie so the dark zones are readable.
+
 ## Playing it
 
 Grab `Gravepowder.3dsx` (and optionally `Gravepowder-models.zip`) from the
@@ -116,13 +138,21 @@ Playing under an emulator (Azahar)? Arrow keys = circle pad, WASD = d-pad, **U/H
 ### Aiming and turning
 
 Hold **L** to aim: the view zooms to 50°, the third-person camera pulls in, the imported gun rises and centres,
-the reticle tightens to a gold cross, spread drops to about a third and recoil is cut — plus a small 3°
-aim-assist cone when your shot would otherwise just miss. **R** fires.
+the reticle tightens to a gold cross, spread drops to about a third and recoil is cut. **R** fires.
 
-Turning is handled by the **gyroscope** (on by default): rotate the console to look around, with a deadzone and
-three sensitivity presets in SETTINGS. If your unit's yaw reads backwards, set **GYRO: INVERT**. On a New 3DS
-the **C-stick** also turns the camera. Touch-drag still aims for anyone who prefers it, and movement now
-accelerates/decelerates instead of snapping, so strafing and kiting feel less clunky.
+Aim-assist (SETTINGS → **AIM ASSIST: OFF / NORMAL / STRONG**, default NORMAL) adds a forgiving cone
+(3.4°/6.3°), gentle aim magnetism while you hold L, and slightly wider zombie hitboxes — so shots connect
+when you're close rather than demanding pixel-perfect aim on a 240p screen. When a zombie is in the cone
+the reticle turns **red/white** with a pulsing ring; hits flash a **white hitmarker X** (gold on a kill)
+with dust/sparkle feedback. Zombies now have glowing eyes and brighter silhouettes so they read against
+the dark mine floor.
+
+Turning is handled by the **gyroscope** (on by default): rotate the console to look around. v0.5 rebuilt the
+gyro pipeline — rest **bias calibration** (on boot/title/pause), a low-pass filter, a 1.7°/s deadzone and
+gentler sensitivity presets — so it turns smoothly instead of twitching. **GYRO** (ON/OFF/INVERT) and
+**GYRO SPEED** (LOW/MED/HIGH) live in SETTINGS; if your unit reads backwards, set INVERT. On a New 3DS the
+**C-stick** also turns the camera. Touch-drag still aims for anyone who prefers it, and movement accelerates/
+decelerates instead of snapping.
 
 ### Sound
 
@@ -177,12 +207,13 @@ tints. Full format + workflow in [`docs/assets.md`](docs/assets.md) and
 
 ## Status
 
-v0.4 "Steady Hands" fixes real-hardware feel: the strafe/turn axes were mirrored (left moved right) and there
-was no way to turn around — both are fixed. **R fires, L aims, A reloads, B sprints**, gyro turns the view
-(INVERT option), the New 3DS C-stick works as a camera fallback, aiming zooms/steadies with an assist cone,
-and movement accelerates smoothly. The campaign itself is unchanged: three zones, the Foreman boss, the
-Trader's shop, save v3 (old saves still load), WARDROBE model swap, four-tab touch UI, ending. 57 fps in
-every measured scene, animated models in both camera modes, original music/SFX.
+v0.5 "Cute & Deadly" is the playability/polish pass on top of v0.4's control fixes: **gyro rebuilt** (bias
+calibration, filtering, gentler presets), **aim assist** OFF/NORMAL/STRONG with magnetism + red reticle lock
+and hitmarkers, zombie hitboxes widened 20 % and zombies given glowing eyes so you can actually see and hit
+them, the UI reworked for **readability and cuteness** (big labels, one-line controls, mascot, springy
+animation), and the world animated (embers, fireflies, casings, death sparkles). The campaign is unchanged:
+three zones, the Foreman boss, the Trader's shop, save v3 (old saves still load), WARDROBE model swap,
+four-tab touch UI, ending. 57 fps in every measured scene, original music/SFX.
 
 Still to do:
 
@@ -206,7 +237,7 @@ committed, so a normal build needs no Python; only re-converting models does (se
 and the headless campaign sim:
 
 ```sh
-make -C tests CC=cc test     # 4024 checks
+make -C tests CC=cc test     # 4074 checks
 make -C tools CC=cc run     # bot clears all 3 zones incl. the Foreman
 make -C tools/preview CC=cc run  # offline UI page tour + layout/legibility check
 ```
