@@ -46,6 +46,10 @@ Two camera modes: **third person** (default — you see the wolf, coat, tail and
 |---|---|---|
 | ![title](docs/screenshots/title.png) | ![third person](docs/screenshots/gameplay.png) | ![first person](docs/screenshots/firstperson.png) |
 
+| Aiming, first person | Aiming, third person | Firing while aimed |
+|---|---|---|
+| ![aim fp](docs/screenshots/aim_fp.png) | ![aim tp](docs/screenshots/aim_tp.png) | ![fire](docs/screenshots/fire.png) |
+
 | Mine area map | World map | Inventory |
 |---|---|---|
 | ![area map](docs/screenshots/area.png) | ![world map](docs/screenshots/world.png) | ![inventory](docs/screenshots/pack.png) |
@@ -54,9 +58,9 @@ Two camera modes: **third person** (default — you see the wolf, coat, tail and
 |---|---|---|
 | ![shop](docs/screenshots/shop.png) | ![boss](docs/screenshots/boss.png) | ![ending](docs/screenshots/ending.png) |
 
-| Pause | Wardrobe / model swap |
-|---|---|
-| ![pause](docs/screenshots/pause.png) | ![wardrobe](docs/screenshots/wardrobe.png) |
+| Pause | Wardrobe / model swap | Settings (gyro, sensitivity) |
+|---|---|---|
+| ![pause](docs/screenshots/pause.png) | ![wardrobe](docs/screenshots/wardrobe.png) | ![settings](docs/screenshots/settings.png) |
 
 (The title, mine, maps, inventory, pause and wardrobe shots are emulator captures. The Trader, Foreman
 and ending pages are rendered offline from the game's own draw lists because reaching them on the
@@ -91,19 +95,34 @@ in `/3ds/` on your SD card, launch it from the Homebrew Launcher. Needs a 3DS wi
 
 | Input | Action |
 |---|---|
-| Circle pad | move |
-| Touchscreen drag | aim / look |
-| A | fire |
-| B | reload |
+| Circle pad | move (camera-relative, properly oriented: left is left) |
+| Touchscreen drag | look / fine aim (still works, 0.6× sensitivity while aiming) |
+| **R (hold)** | **fire** |
+| **L (hold)** | **aim** — raises the gun, tightens the reticle, narrows the camera to 50°, steadies the weapon and enables the small aim assist cone |
+| A | reload |
+| B (hold) | sprint |
 | X | switch weapon |
 | Y | toggle first / third person |
-| L | sprint |
+| **Gyro** | **turn/look by moving the console** — on by default (settings: ON / OFF / INVERT, sensitivity LOW / MED / HIGH) |
+| New 3DS C-stick | camera turn fallback (left/right yaw, up/down pitch) |
 | Select | cycle bottom-screen pages |
 | Touch tabs | switch pages / tap nodes, weapon cards, shop items, buttons |
 | Start | pause / resume |
 
 Playing under an emulator (Azahar)? Arrow keys = circle pad, WASD = d-pad, **U/H/J/K** = X/Y/B/A,
 **Q/I** = L/R, **M/N** = Start/Select, and the mouse on the bottom screen is the touchscreen.
+(Emulators usually report zero gyro motion — the game handles that silently; touch/stick aiming still works.)
+
+### Aiming and turning
+
+Hold **L** to aim: the view zooms to 50°, the third-person camera pulls in, the imported gun rises and centres,
+the reticle tightens to a gold cross, spread drops to about a third and recoil is cut — plus a small 3°
+aim-assist cone when your shot would otherwise just miss. **R** fires.
+
+Turning is handled by the **gyroscope** (on by default): rotate the console to look around, with a deadzone and
+three sensitivity presets in SETTINGS. If your unit's yaw reads backwards, set **GYRO: INVERT**. On a New 3DS
+the **C-stick** also turns the camera. Touch-drag still aims for anyone who prefers it, and movement now
+accelerates/decelerates instead of snapping, so strafing and kiting feel less clunky.
 
 ### Sound
 
@@ -158,10 +177,12 @@ tints. Full format + workflow in [`docs/assets.md`](docs/assets.md) and
 
 ## Status
 
-v0.3 is the complete campaign: three zones (Ashen Mill, Bone Orchard, Old Mine), the Foreman boss
-fight, the Trader's shop, save v3 with CONTINUE/NEW GAME and an erase-save page, the WARDROBE model
-swap page, four-tab touch UI with per-zone AREA maps, accuracy tracking and a proper ending. 57 fps
-in every measured scene, animated models in both camera modes, original music/SFX.
+v0.4 "Steady Hands" fixes real-hardware feel: the strafe/turn axes were mirrored (left moved right) and there
+was no way to turn around — both are fixed. **R fires, L aims, A reloads, B sprints**, gyro turns the view
+(INVERT option), the New 3DS C-stick works as a camera fallback, aiming zooms/steadies with an assist cone,
+and movement accelerates smoothly. The campaign itself is unchanged: three zones, the Foreman boss, the
+Trader's shop, save v3 (old saves still load), WARDROBE model swap, four-tab touch UI, ending. 57 fps in
+every measured scene, animated models in both camera modes, original music/SFX.
 
 Still to do:
 
@@ -185,7 +206,7 @@ committed, so a normal build needs no Python; only re-converting models does (se
 and the headless campaign sim:
 
 ```sh
-make -C tests CC=cc test     # 3958 checks
+make -C tests CC=cc test     # 4024 checks
 make -C tools CC=cc run     # bot clears all 3 zones incl. the Foreman
 make -C tools/preview CC=cc run  # offline UI page tour + layout/legibility check
 ```
