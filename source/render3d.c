@@ -111,6 +111,60 @@
 #define R3D_FILL_R 0.30f
 #define R3D_FILL_G 0.26f
 #define R3D_FILL_B 0.22f
+/* ------------------------------------------------------------------ */
+/* per-zone atmosphere palettes (v0.3)                                */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    unsigned clear_color;              /* 0xRRGGBBAA                        */
+    float    fog_r, fog_g, fog_b;      /* fog + horizon colour              */
+    float    fog_near, fog_far;
+    float    light_r, light_g, light_b;
+    float    ambient_r, ambient_g, ambient_b;
+    float    fill_r, fill_g, fill_b;
+    float    ground_r, ground_g, ground_b;  /* tint on the baked ground mesh */
+    float    hills_r, hills_g, hills_b;     /* distant hills tint            */
+    float    dir_x, dir_y, dir_z;      /* world-space sun direction         */
+    float    glow;                     /* 0..1 lantern/ore light pool gain  */
+} R3dZonePalette;
+
+/* Ashen Mill keeps the v0.2 dusty tan exactly; Bone Orchard is a colder
+ * grey-green night; Old Mine is dark brown-grey with low warm amber fog. */
+static const R3dZonePalette s_zone_palettes[ZONE_COUNT] = {
+    /* ZONE_ASHEN_MILL */
+    { 0x7A6E58FFu, 0.4784f, 0.4314f, 0.3451f, 8.0f, 58.0f,
+      0.86f, 0.72f, 0.47f, 0.42f, 0.42f, 0.46f, 0.30f, 0.26f, 0.22f,
+      1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, -0.42f, 0.86f, 0.30f, 0.0f },
+    /* ZONE_BONE_ORCHARD */
+    { 0x596257FFu, 0.34f, 0.38f, 0.34f, 7.0f, 50.0f,
+      0.60f, 0.72f, 0.60f, 0.32f, 0.36f, 0.34f, 0.22f, 0.26f, 0.23f,
+      0.90f, 0.96f, 0.90f, 0.80f, 0.86f, 0.80f, -0.30f, 0.80f, 0.40f, 0.15f },
+    /* ZONE_OLD_MINE */
+    { 0x2B2118FFu, 0.23f, 0.175f, 0.125f, 4.0f, 34.0f,
+      0.98f, 0.64f, 0.28f, 0.21f, 0.175f, 0.19f, 0.24f, 0.16f, 0.10f,
+      0.68f, 0.60f, 0.53f, 0.36f, 0.28f, 0.21f, -0.30f, 0.75f, 0.45f, 1.0f },
+};
+
+static const R3dZonePalette *s_zone_pal;
+
+static const R3dZonePalette *r3d_zone_palette(ZoneId zone)
+{
+    if ((int)zone < 0 || (int)zone >= ZONE_COUNT)
+        return &s_zone_palettes[ZONE_ASHEN_MILL];
+    return &s_zone_palettes[(int)zone];
+}
+
+static void r3d_zone_select(ZoneId zone)
+{
+    s_zone_pal = r3d_zone_palette(zone);
+}
+
+static const R3dZonePalette *r3d_palette(void)
+{
+    if (s_zone_pal == NULL)
+        s_zone_pal = &s_zone_palettes[ZONE_ASHEN_MILL];
+    return s_zone_pal;
+}
 
 #define R3D_MESH_ARENA_BYTES (2u * 1024u * 1024u)
 #define R3D_SCRATCH_VERTS    16384
@@ -121,11 +175,12 @@
 /* imported-model runtime (GPM v1) */
 #define R3D_HERO_HEIGHT        1.88f  /* hat-top height in metres (Lead: 1.85-1.90) */
 #define R3D_HERO_HEAD_TOP      0.417f /* procedural hat top above the Head bone */
-#define R3D_NEAR_ZOMBIES       4      /* fully skinned zombies                */
-#define R3D_SKIN_BUDGET        28000  /* max skinned verts/frame total (tuned) */
+#define R3D_NEAR_ZOMBIES       3      /* fully skinned zombies (27k verts cap) */
+#define R3D_SKIN_BUDGET        27000  /* max skinned verts/frame total (tuned) */
 #define R3D_ZOMBIE_LOD_DIST    14.0f  /* further zombies reuse a shared pose  */
 #define R3D_MODEL_DIR          "sdmc:/3ds/Gravepowder/models/"
 #define R3D_MAX_MODEL_VERTS    12000  /* dynamic VBO capacity per instance    */
+#define R3D_FOREMAN_HEIGHT     2.80f  /* v0.3 boss body height (~1.65x shambler) */
 
 /* core's muzzle_flash timer counts down from 0.07 s */
 #define R3D_MUZZLE_FLASH_TIME 0.07f
@@ -193,9 +248,34 @@ static GpmModel s_gpm_zombie;
 static bool s_gpm_zombie_ok;
 static GpmModel s_gpm_gun[WEAPON_COUNT];
 static bool s_gpm_gun_ok[WEAPON_COUNT];
-static Mesh s_gpm_gun_mesh[WEAPON_COUNT];  /* baked static meshes (arena)  */
+
+/* Imported static gun mesh: GPM vertex data + indices uploaded once into
+ * linearAlloc memory and drawn indexed (smaller and fully reloadable, unlike
+ * baking expanded meshes into the static arena). */
+typedef struct {
+    MeshVertex *verts;      /* linearAlloc'd, MESH_VERTEX_STRIDE layout     */
+    uint16_t   *ibo;        /* linearAlloc'd index buffer                   */
+    int         vert_count;
+    int         index_count;
+} R3dGunMesh;
+
+static R3dGunMesh s_gpm_gun_mesh[WEAPON_COUNT];
 static float s_gpm_gun_scale[WEAPON_COUNT];
 static Vec3 s_gpm_gun_muzzle_local[WEAPON_COUNT]; /* +Z barrel tip, model space */
+
+/* Where each model slot came from, for the wardrobe page. */
+typedef enum {
+    R3D_SRC_NONE = 0,
+    R3D_SRC_SD,
+    R3D_SRC_EMBEDDED,
+    R3D_SRC_PROCEDURAL,
+    R3D_SRC_CUSTOM
+} R3dModelSrcKind;
+
+static R3dModelSrcKind s_src_hero;
+static R3dModelSrcKind s_src_zombie;
+static R3dModelSrcKind s_src_gun[WEAPON_COUNT];
+static char s_model_source_text[R3D_MODEL_COUNT][64];
 
 /* hero runtime */
 static SkinInstance s_hero_skin;
@@ -235,6 +315,9 @@ static bool s_zombie_far_inited;
 static float s_zombie_far_clock;
 static float s_zombie_model_scale = 0.93f;
 static float s_zombie_bbox_min_y;
+static int s_zombie_bone_head = -1;   /* Head bone on the zombie model (boss eye anchor) */
+static Vec3 s_boss_head_pos;          /* skinned head world position, refreshed per frame */
+static bool s_boss_head_valid;
 static int s_zombie_clip_idle = -1, s_zombie_clip_walk = -1, s_zombie_clip_run = -1;
 static int s_zombie_clip_attack = -1, s_zombie_clip_hit = -1, s_zombie_clip_death = -1;
 
@@ -347,10 +430,12 @@ static float hash01(unsigned x)
 static void bind_pass_state(const C3D_Mtx *projection, const C3D_Mtx *view)
 {
     int i;
-    Vec3 light = v3_norm(v3(-0.42f, 0.86f, 0.30f));
+    const R3dZonePalette *pal = r3d_palette();
+    Vec3 light = v3_norm(v3(pal->dir_x, pal->dir_y, pal->dir_z));
     float lx = view->r[0].x * light.x + view->r[0].y * light.y + view->r[0].z * light.z;
     float ly = view->r[1].x * light.x + view->r[1].y * light.y + view->r[1].z * light.z;
     float lz = view->r[2].x * light.x + view->r[2].y * light.y + view->r[2].z * light.z;
+    float fog_inv = 1.0f / (pal->fog_far - pal->fog_near);
 
     C3D_BindProgram(&s_program);
     C3D_SetAttrInfo(&s_attr);
@@ -374,15 +459,15 @@ static void bind_pass_state(const C3D_Mtx *projection, const C3D_Mtx *view)
     s_last_projection = *projection;
     C3D_FVUnifSet(GPU_VERTEX_SHADER, s_u_light_dir, lx, ly, lz, 0.0f);
     C3D_FVUnifSet(GPU_VERTEX_SHADER, s_u_light_color,
-                  R3D_LIGHT_R, R3D_LIGHT_G, R3D_LIGHT_B, 0.0f);
+                  pal->light_r, pal->light_g, pal->light_b, 0.0f);
     C3D_FVUnifSet(GPU_VERTEX_SHADER, s_u_ambient,
-                  R3D_AMBIENT_R, R3D_AMBIENT_G, R3D_AMBIENT_B, 0.0f);
+                  pal->ambient_r, pal->ambient_g, pal->ambient_b, 0.0f);
     C3D_FVUnifSet(GPU_VERTEX_SHADER, s_u_fill_color,
-                  R3D_FILL_R, R3D_FILL_G, R3D_FILL_B, 0.0f);
+                  pal->fill_r, pal->fill_g, pal->fill_b, 0.0f);
     C3D_FVUnifSet(GPU_VERTEX_SHADER, s_u_fog_color,
-                  R3D_SKY_R, R3D_SKY_G, R3D_SKY_B, 0.0f);
+                  pal->fog_r, pal->fog_g, pal->fog_b, 0.0f);
     C3D_FVUnifSet(GPU_VERTEX_SHADER, s_u_fog_params,
-                  -R3D_FOG_NEAR * R3D_FOG_INV, -R3D_FOG_INV, 0.0f, 0.0f);
+                  -pal->fog_near * fog_inv, -fog_inv, 0.0f, 0.0f);
 }
 
 /* ------------------------------------------------------------------ */
@@ -455,7 +540,7 @@ static bool world_visible(const C3D_Mtx *view, Vec3 c, float radius)
     if (vz > radius)
         return false;
     depth = -vz;
-    if (depth > R3D_FOG_FAR + radius)
+    if (depth > r3d_palette()->fog_far + radius)
         return false;
     if (fabsf(vx) > depth * 1.8f + radius)
         return false;
@@ -776,9 +861,10 @@ static float zombie_scale(ZombieType type)
     /* core heights: shambler 1.70 m, runner 1.60 m, brute 2.30 m; the baked
      * pose meshes are ~1.83 m tall, so these are height/1.83. */
     switch (type) {
-    case ZOMBIE_RUNNER: return 0.87f;
-    case ZOMBIE_BRUTE:  return 1.26f;
-    default:            return 0.93f;
+    case ZOMBIE_RUNNER:  return 0.87f;
+    case ZOMBIE_BRUTE:   return 1.26f;
+    case ZOMBIE_FOREMAN: return R3D_FOREMAN_HEIGHT / 1.83f;
+    default:             return 0.93f;
     }
 }
 
@@ -838,6 +924,12 @@ static void draw_zombie(const Zombie *z, int index, const C3D_Mtx *view)
         tint_g = 1.20f;
         tint_b = 1.10f;
     }
+    if (type == ZOMBIE_FOREMAN) {
+        /* charred, soot-blackened hide (eyes glow additively in zone_glow_build) */
+        tint_r = 0.40f;
+        tint_g = 0.35f;
+        tint_b = 0.34f;
+    }
     Mtx_Scale(&model, scale, scale, scale);
 
     draw_model(view, mesh, &model, tint_r, tint_g, tint_b, 0.0f);
@@ -867,6 +959,10 @@ static const float s_prop_palette[PROP_KIND_COUNT][3] = {
     { 0.42f, 0.33f, 0.24f },   /* deadtree   */
     { 0.52f, 0.51f, 0.48f },   /* well       */
     { 0.48f, 0.43f, 0.36f },   /* gate       */
+    { 0.56f, 0.44f, 0.30f },   /* timber     */
+    { 0.52f, 0.40f, 0.27f },   /* cart       */
+    { 1.12f, 1.02f, 0.90f },   /* ore (bright, glows via additive halo) */
+    { 1.15f, 0.95f, 0.68f },   /* lantern (warm, glows) */
 };
 
 static void draw_prop_one(const Prop *p, int index, const C3D_Mtx *view)
@@ -1019,6 +1115,233 @@ static void update_smoke(const GraveGame *game, float dt, Vec3 muzzle, bool muzz
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* v0.3 zone effects: lantern/ore glow, Foreman presence and stomps   */
+/* ------------------------------------------------------------------ */
+
+#define R3D_MAX_BURSTS     6
+
+typedef struct {
+    Vec3  pos;
+    float age, life, radius, strength;
+    bool  active;
+} R3dGroundBurst;
+
+static R3dGroundBurst s_bursts[R3D_MAX_BURSTS];
+static int s_burst_next;
+static bool s_boss_was_alive;
+static float s_boss_prev_atk;
+
+static float zombie_type_height(ZombieType type)
+{
+    switch (type) {
+    case ZOMBIE_RUNNER:  return 1.60f;
+    case ZOMBIE_BRUTE:   return 2.30f;
+    case ZOMBIE_FOREMAN: return R3D_FOREMAN_HEIGHT;
+    default:             return 1.70f;
+    }
+}
+
+static const Zombie *find_boss(const GraveGame *game)
+{
+    int i;
+    if (game == NULL)
+        return NULL;
+    for (i = 0; i < MAX_ZOMBIES; i++) {
+        const Zombie *z = &game->zombies[i];
+        if (z->active && z->type == ZOMBIE_FOREMAN && z->state != ZOMBIE_DEAD)
+            return z;
+    }
+    return NULL;
+}
+
+static void burst_spawn(Vec3 pos, float radius, float life, float strength)
+{
+    R3dGroundBurst *b = &s_bursts[s_burst_next];
+    s_burst_next = (s_burst_next + 1) % R3D_MAX_BURSTS;
+    b->pos = pos;
+    b->age = 0.0f;
+    b->life = life;
+    b->radius = radius;
+    b->strength = strength;
+    b->active = true;
+}
+
+static void dust_puff_spawn(Vec3 pos, float spread, int count)
+{
+    int i;
+    for (i = 0; i < count; i++) {
+        SmokePuff *p = &s_puffs[s_puff_next];
+        float r1 = hash01((unsigned)s_puff_next * 7919u + 3u);
+        float r2 = hash01((unsigned)s_puff_next * 104729u + 11u);
+        s_puff_next = (s_puff_next + 1) % R3D_MAX_PUFFS;
+        p->active = true;
+        p->age = 0.0f;
+        p->life = 0.55f + 0.45f * r1;
+        p->size = 0.10f + 0.08f * r2;
+        p->pos = v3_add(pos, v3((r1 - 0.5f) * spread,
+                                0.05f + 0.10f * r2,
+                                (r2 - 0.5f) * spread));
+        p->vel = v3((r1 - 0.5f) * 0.9f, 0.45f + 0.4f * r2,
+                    (r2 - 0.5f) * 0.9f);
+    }
+}
+
+/* Called once per frame (not per eye) so effects do not spawn twice in 3D. */
+static void boss_effects_update(const GraveGame *game, float dt)
+{
+    const Zombie *boss = find_boss(game);
+    bool alive = (boss != NULL) || (game != NULL && game->boss_alive);
+    int i;
+
+    if (alive && !s_boss_was_alive && boss != NULL) {
+        /* Foreman rises: dust ring + a burst of smoke at his feet */
+        burst_spawn(v3(boss->pos.x, 0.05f, boss->pos.z), 2.4f, 1.2f, 1.3f);
+        dust_puff_spawn(v3(boss->pos.x, 0.20f, boss->pos.z), 1.4f, 6);
+    }
+
+    if (boss != NULL) {
+        float atk = boss->attack_timer;
+        if (atk > s_boss_prev_atk + 0.05f) {
+            burst_spawn(v3(boss->pos.x, 0.05f, boss->pos.z), 1.7f, 0.8f, 1.1f);
+            dust_puff_spawn(v3(boss->pos.x, 0.15f, boss->pos.z), 1.1f, 3);
+        }
+        s_boss_prev_atk = atk;
+    } else {
+        s_boss_prev_atk = 0.0f;
+    }
+    s_boss_was_alive = alive;
+
+    for (i = 0; i < R3D_MAX_BURSTS; i++) {
+        if (!s_bursts[i].active)
+            continue;
+        s_bursts[i].age += dt;
+        if (s_bursts[i].age >= s_bursts[i].life)
+            s_bursts[i].active = false;
+    }
+}
+
+/* Appends additive glow quads for mine lights, ore and the Foreman's eyes.
+ * Must be called after effects_build() reset the dynamic buffer. */
+static void zone_glow_build(const GraveGame *game, const C3D_Mtx *view,
+                            const Vec3 *right, const Vec3 *up)
+{
+    const R3dZonePalette *pal = r3d_palette();
+    Vec3 ax = v3(1.0f, 0.0f, 0.0f);
+    Vec3 az = v3(0.0f, 0.0f, 1.0f);
+    const Zombie *boss;
+    float t;
+    int i;
+
+    if (game == NULL)
+        return;
+    t = game->zone_time;
+
+    if (pal->glow > 0.01f) {
+        int count = game->prop_count;
+        if (count > MAX_PROPS)
+            count = MAX_PROPS;
+        for (i = 0; i < count; i++) {
+            const Prop *p = &game->props[i];
+            float sx = 2.0f * p->half.x;
+            float sy = 2.0f * p->half.y;
+            float sz = 2.0f * p->half.z;
+            float lx, ly, wx, wy, wz, size, flick;
+
+            if (p->kind != PROP_LANTERN && p->kind != PROP_ORE)
+                continue;
+            if (!world_visible(view, v3(p->pos.x, p->pos.y + p->half.y, p->pos.z),
+                                fmaxf(fmaxf(sx, sy), 1.2f)))
+                continue;
+
+            if (p->kind == PROP_LANTERN) {
+                lx = 0.305f;
+                ly = 0.725f;
+            } else {
+                lx = 0.0f;
+                ly = 0.34f;
+            }
+            wx = p->pos.x + cosf(p->yaw) * lx * sx;
+            wz = p->pos.z - sinf(p->yaw) * lx * sz;
+            wy = p->pos.y + ly * sy;
+
+            flick = 0.78f + 0.16f * sinf(t * 7.3f + (float)i * 1.7f) +
+                    0.06f * hash01((unsigned)i * 2654435761u + 7u);
+            flick *= pal->glow;
+
+            if (p->kind == PROP_LANTERN) {
+                size = 0.13f * fmaxf(fmaxf(sx, sy), 0.4f) + 0.05f;
+                /* warm halo at the lantern head */
+                dyn_quad(v3(wx, wy, wz), *right, *up, size, size,
+                         0.95f * flick, 0.58f * flick, 0.22f * flick);
+                dyn_quad(v3(wx, wy, wz), *right, *up, size * 0.45f, size * 0.45f,
+                         1.10f * flick, 0.85f * flick, 0.45f * flick);
+                /* light pool on the ground below */
+                dyn_quad(v3(p->pos.x, 0.035f, p->pos.z), ax, az,
+                         0.75f * sx, 0.75f * sz,
+                         0.30f * flick, 0.18f * flick, 0.06f * flick);
+            } else {
+                size = 0.16f * fmaxf(sx, sy) + 0.05f;
+                dyn_quad(v3(wx, wy + 0.15f * sy, wz), *right, *up, size, size,
+                         0.55f * flick, 0.30f * flick, 0.08f * flick);
+                dyn_quad(v3(wx, wy + 0.10f * sy, wz), *right, *up,
+                         size * 0.5f, size * 0.5f,
+                         0.30f * flick, 0.70f * flick, 0.62f * flick);
+            }
+        }
+
+        /* expanding dust rings (boss spawn / stomps) */
+        for (i = 0; i < R3D_MAX_BURSTS; i++) {
+            const R3dGroundBurst *b = &s_bursts[i];
+            float k, fade, rad;
+            int seg;
+            if (!b->active)
+                continue;
+            k = b->age / b->life;
+            fade = (1.0f - k) * (1.0f - k) * b->strength;
+            rad = b->radius * (0.15f + 0.85f * k);
+            for (seg = 0; seg < 10; seg++) {
+                float a = (float)seg * (6.2831853f / 10.0f) + b->age * 1.2f;
+                Vec3 p = v3(b->pos.x + cosf(a) * rad, 0.045f,
+                            b->pos.z + sinf(a) * rad);
+                dyn_quad(p, ax, az, 0.20f * rad + 0.04f, 0.20f * rad + 0.04f,
+                         0.42f * fade, 0.35f * fade, 0.26f * fade);
+            }
+        }
+    }
+
+    /* Foreman: red eye glow + charred halo */
+    boss = find_boss(game);
+    if (boss != NULL) {
+        float height = zombie_type_height(boss->type);
+        float scale = height / 1.70f;
+        float pulse = 0.80f + 0.20f * sinf(t * 4.1f);
+        Vec3 anchor;
+        float anchor_fwd_x = sinf(boss->yaw);
+        float anchor_fwd_z = cosf(boss->yaw);
+        int e;
+
+        if (s_boss_head_valid) {
+            anchor = s_boss_head_pos;
+        } else {
+            anchor = v3(boss->pos.x + anchor_fwd_x * 0.16f * scale,
+                        boss->pos.y + 0.92f * height,
+                        boss->pos.z + anchor_fwd_z * 0.16f * scale);
+        }
+        for (e = -1; e <= 1; e += 2) {
+            Vec3 eye = v3(anchor.x - anchor_fwd_z * 0.085f * scale * (float)e,
+                          anchor.y + 0.02f * scale,
+                          anchor.z + anchor_fwd_x * 0.085f * scale * (float)e);
+            dyn_quad(eye, *right, *up, 0.045f * scale, 0.032f * scale,
+                     1.10f * pulse, 0.10f, 0.06f);
+            dyn_quad(eye, *right, *up, 0.10f * scale, 0.075f * scale,
+                     0.35f * pulse, 0.03f, 0.02f);
+        }
+        dyn_quad(v3(boss->pos.x, boss->pos.y + 0.35f, boss->pos.z),
+                 ax, az, 0.9f * scale, 0.9f * scale,
+                 0.14f * pulse, 0.04f, 0.02f);
+    }
+}
 /* slow drifting dust motes: cheap atmosphere, 16 additive quads */
 static void dust_update(float dt, Vec3 cam)
 {
@@ -1282,27 +1605,6 @@ static int r3d_find_bone_flexible(const GpmModel *m, const char *exact,
     return -1;
 }
 
-/* Bakes a GPM vertex/index list into a normal static Mesh (guns, props). */
-static bool gpm_bake_static_mesh(Mesh *out, const GpmModel *m,
-                                 MeshVertex *scratch, int scratch_cap)
-{
-    MeshBuilder b;
-    C3D_Mtx id;
-    uint32_t i;
-
-    mesh_builder_begin(&b, scratch, scratch_cap);
-    Mtx_Identity(&id);
-    for (i = 0; i < m->index_count; i++) {
-        const GpmVertex *v = &m->vertices[m->indices[i]];
-        mesh_builder_vertex(&b, &id,
-                            v->pos[0], v->pos[1], v->pos[2],
-                            v->nrm[0], v->nrm[1], v->nrm[2],
-                            (float)v->col[0] * (1.0f / 255.0f),
-                            (float)v->col[1] * (1.0f / 255.0f),
-                            (float)v->col[2] * (1.0f / 255.0f));
-    }
-    return mesh_commit(&b, out, &s_arena);
-}
 
 typedef struct {
     const char *name;
@@ -1311,17 +1613,22 @@ typedef struct {
 } R3dEmbeddedModel;
 
 static bool r3d_load_one_model(GpmModel *model, bool *ok, const char *name,
-                               const R3dEmbeddedModel *embedded, bool need_skinned)
+                               const R3dEmbeddedModel *embedded, bool need_skinned,
+                               R3dModelSrcKind *src_out)
 {
     char path[160];
     const char *err;
 
     *ok = false;
+    if (src_out != NULL)
+        *src_out = R3D_SRC_PROCEDURAL;
     memset(model, 0, sizeof(*model));
 
     snprintf(path, sizeof(path), R3D_MODEL_DIR "%s.gpm", name);
     err = gpm_load_file(model, path);
     if (err == NULL) {
+        if (src_out != NULL)
+            *src_out = R3D_SRC_SD;
         r3d_asset_log("%-14s SD        %s verts=%u idx=%u bones=%u anims=%u",
                       name, path, model->vertex_count, model->index_count,
                       model->bone_count, model->anim_count);
@@ -1330,6 +1637,8 @@ static bool r3d_load_one_model(GpmModel *model, bool *ok, const char *name,
         if (embedded != NULL && embedded->data != NULL && embedded->size > 0) {
             err = gpm_parse_memory(model, embedded->data, embedded->size);
             if (err == NULL) {
+                if (src_out != NULL)
+                    *src_out = R3D_SRC_EMBEDDED;
                 r3d_asset_log("%-14s embedded  verts=%u idx=%u bones=%u anims=%u",
                               name, model->vertex_count, model->index_count,
                               model->bone_count, model->anim_count);
@@ -1346,10 +1655,59 @@ static bool r3d_load_one_model(GpmModel *model, bool *ok, const char *name,
     if (need_skinned && !gpm_is_skinned(model)) {
         r3d_asset_log("%-14s rejected: not skinned", name);
         gpm_destroy(model);
+        if (src_out != NULL)
+            *src_out = R3D_SRC_PROCEDURAL;
         return false;
     }
     *ok = true;
     return true;
+}
+
+/* Fills the per-slot provenance strings printed by the wardrobe page. */
+static void r3d_update_model_sources(void)
+{
+    static const char *const gun_names[WEAPON_COUNT] = {
+        "gun_flintlock.gpm", "gun_revolver.gpm", "gun_musket.gpm"
+    };
+    int w;
+    bool all_sd = true, all_embedded = true, any_proc = false;
+    const char *src = "not loaded";
+
+    switch (s_src_hero) {
+    case R3D_SRC_SD:         src = "SD: hero.gpm"; break;
+    case R3D_SRC_EMBEDDED:   src = "embedded"; break;
+    case R3D_SRC_PROCEDURAL: src = "procedural fallback"; break;
+    case R3D_SRC_CUSTOM:     src = "custom model"; break;
+    default:                 break;
+    }
+    snprintf(s_model_source_text[R3D_MODEL_HERO], 64, "%s", src);
+
+    switch (s_src_zombie) {
+    case R3D_SRC_SD:         src = "SD: zombie.gpm"; break;
+    case R3D_SRC_EMBEDDED:   src = "embedded"; break;
+    case R3D_SRC_PROCEDURAL: src = "procedural fallback"; break;
+    default:                 src = "not loaded"; break;
+    }
+    snprintf(s_model_source_text[R3D_MODEL_ZOMBIE], 64, "%s", src);
+
+    for (w = 0; w < WEAPON_COUNT; w++) {
+        if (s_src_gun[w] != R3D_SRC_SD)
+            all_sd = false;
+        if (s_src_gun[w] != R3D_SRC_EMBEDDED)
+            all_embedded = false;
+        if (s_src_gun[w] == R3D_SRC_PROCEDURAL)
+            any_proc = true;
+    }
+    if (all_sd)
+        src = "SD: gun_*.gpm";
+    else if (all_embedded)
+        src = "embedded";
+    else if (any_proc)
+        src = "procedural fallback";
+    else
+        src = "mixed SD/embedded";
+    snprintf(s_model_source_text[R3D_MODEL_GUNS], 64, "%s", src);
+    (void)gun_names;
 }
 
 /* Resolves standard clip roles into model clip indices (with fallbacks). */
@@ -1392,6 +1750,7 @@ static void r3d_resolve_zombie_clips(void)
     s_zombie_clip_attack = clip_chain(&s_gpm_zombie, attack, 4);
     s_zombie_clip_hit = clip_chain(&s_gpm_zombie, hit, 2);
     s_zombie_clip_death = clip_chain(&s_gpm_zombie, death, 3);
+    s_zombie_bone_head = r3d_find_bone_flexible(&s_gpm_zombie, "Head", "head");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1586,13 +1945,14 @@ static void r3d_assets_init(void)
     /* hero */
     {
         R3dEmbeddedModel emb = r3d_hero_embedded_model();
-        if (r3d_load_one_model(&s_gpm_hero, &s_gpm_hero_ok, "hero", &emb, true))
+        if (r3d_load_one_model(&s_gpm_hero, &s_gpm_hero_ok, "hero", &emb, true,
+                               &s_src_hero))
             r3d_hero_configure(&s_gpm_hero);
     }
 
     /* zombie */
     if (r3d_load_one_model(&s_gpm_zombie, &s_gpm_zombie_ok, "zombie",
-                           &zombie_emb, true)) {
+                           &zombie_emb, true, &s_src_zombie)) {
         float height = s_gpm_zombie.bbox_max.y - s_gpm_zombie.bbox_min.y;
         s_zombie_model_scale = (height > 0.1f) ? (1.70f / height) : 0.93f;
         s_zombie_bbox_min_y = s_gpm_zombie.bbox_min.y;
@@ -1610,7 +1970,7 @@ static void r3d_assets_init(void)
     for (w = 0; w < WEAPON_COUNT; w++) {
         GpmModel *gm = &s_gpm_gun[w];
         if (r3d_load_one_model(gm, &s_gpm_gun_ok[w], gun_names[w],
-                               &gun_emb[w], false)) {
+                               &gun_emb[w], false, &s_src_gun[w])) {
             s_gpm_gun_scale[w] = 1.0f;
             s_gpm_gun_muzzle_local[w] = v3(
                 (gm->bbox_min.x + gm->bbox_max.x) * 0.5f,
@@ -1621,6 +1981,7 @@ static void r3d_assets_init(void)
                           s_gpm_gun_muzzle_local[w].z);
         }
     }
+    r3d_update_model_sources();
 }
 
 /* Frees model storage (used by r3d_fini and the reload API). */
@@ -1637,7 +1998,209 @@ static void r3d_assets_free(void)
         s_gpm_gun_ok[w] = false;
 }
 
+/* ------------------------------------------------------------------ */
+/* imported static gun meshes (indexed, linearAlloc, reloadable)      */
+/* ------------------------------------------------------------------ */
 
+static void r3d_gun_mesh_free(int w)
+{
+    R3dGunMesh *gm = &s_gpm_gun_mesh[w];
+
+    if (gm->verts != NULL)
+        linearFree(gm->verts);
+    if (gm->ibo != NULL)
+        linearFree(gm->ibo);
+    memset(gm, 0, sizeof(*gm));
+}
+
+static void r3d_gun_meshes_free(void)
+{
+    int w;
+    for (w = 0; w < WEAPON_COUNT; w++)
+        r3d_gun_mesh_free(w);
+}
+
+/* Uploads the GPM gun vertices + indices into linearAlloc buffers. */
+static bool r3d_gun_mesh_build(int w)
+{
+    const GpmModel *m = &s_gpm_gun[w];
+    R3dGunMesh *gm = &s_gpm_gun_mesh[w];
+    uint32_t i;
+
+    r3d_gun_mesh_free(w);
+    if (!s_gpm_gun_ok[w] || m->data == NULL || m->vertex_count == 0 ||
+        m->index_count == 0)
+        return false;
+
+    gm->verts = (MeshVertex *)linearAlloc((size_t)m->vertex_count * sizeof(MeshVertex));
+    gm->ibo = (uint16_t *)linearAlloc((size_t)m->index_count * sizeof(uint16_t));
+    if (gm->verts == NULL || gm->ibo == NULL) {
+        r3d_asset_log("gun[%d]: indexed mesh alloc failed (verts=%u)", w,
+                      m->vertex_count);
+        r3d_gun_mesh_free(w);
+        return false;
+    }
+    for (i = 0; i < m->vertex_count; i++) {
+        const GpmVertex *v = &m->vertices[i];
+        MeshVertex *o = &gm->verts[i];
+        o->pos[0] = v->pos[0];
+        o->pos[1] = v->pos[1];
+        o->pos[2] = v->pos[2];
+        o->nrm[0] = v->nrm[0];
+        o->nrm[1] = v->nrm[1];
+        o->nrm[2] = v->nrm[2];
+        o->col[0] = (float)v->col[0] * (1.0f / 255.0f);
+        o->col[1] = (float)v->col[1] * (1.0f / 255.0f);
+        o->col[2] = (float)v->col[2] * (1.0f / 255.0f);
+    }
+    memcpy(gm->ibo, m->indices, (size_t)m->index_count * sizeof(uint16_t));
+    gm->vert_count = (int)m->vertex_count;
+    gm->index_count = (int)m->index_count;
+    return true;
+}
+
+static void r3d_gun_meshes_build(void)
+{
+    int w;
+    for (w = 0; w < WEAPON_COUNT; w++)
+        (void)r3d_gun_mesh_build(w);
+}
+
+/* Draws one imported gun with the current model-view matrix. */
+static void draw_gpm_gun(const C3D_Mtx *model_view, WeaponId weapon, float unlit)
+{
+    R3dGunMesh *gm;
+
+    if ((int)weapon < 0 || (int)weapon >= WEAPON_COUNT)
+        return;
+    gm = &s_gpm_gun_mesh[weapon];
+    if (gm->verts == NULL || gm->ibo == NULL)
+        return;
+
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_u_model_view, model_view);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_u_tint, 1.0f, 1.0f, 1.0f, unlit);
+    {
+        C3D_BufInfo *buf = C3D_GetBufInfo();
+        BufInfo_Init(buf);
+        BufInfo_Add(buf, gm->verts, MESH_VERTEX_STRIDE, MESH_ATTR_COUNT,
+                    MESH_ATTR_PERMUTATION);
+    }
+    C3D_DrawElements(GPU_TRIANGLES, gm->index_count, C3D_UNSIGNED_SHORT, gm->ibo);
+    s_draw_calls++;
+    s_draw_verts += (unsigned)gm->vert_count;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* imported model runtime lifecycle                                   */
+/* (shared by r3d_init, hero hot-swap and r3d_reload_all_models)      */
+/* ------------------------------------------------------------------ */
+
+static void r3d_skin_buffers_free(void)
+{
+    int i;
+
+    if (s_hero_vbo != NULL)
+        linearFree(s_hero_vbo);
+    s_hero_vbo = NULL;
+    if (s_hero_ibo != NULL)
+        linearFree(s_hero_ibo);
+    s_hero_ibo = NULL;
+    s_hero_vert_cap = 0;
+    s_hero_index_count = 0;
+
+    for (i = 0; i < R3D_NEAR_ZOMBIES; i++) {
+        if (s_zombie_vbo[i] != NULL)
+            linearFree(s_zombie_vbo[i]);
+        s_zombie_vbo[i] = NULL;
+        s_zombie_slot_inited[i] = false;
+    }
+    if (s_zombie_far_vbo != NULL)
+        linearFree(s_zombie_far_vbo);
+    s_zombie_far_vbo = NULL;
+    s_zombie_far_inited = false;
+    if (s_zombie_ibo != NULL)
+        linearFree(s_zombie_ibo);
+    s_zombie_ibo = NULL;
+    s_zombie_index_count = 0;
+    s_zombie_vert_count = 0;
+    s_zombie_vert_cap = 0;
+}
+
+static void r3d_dynamic_bytes_update(void)
+{
+    int i;
+
+    s_dynamic_bytes = 0;
+    if (s_hero_vbo != NULL)
+        s_dynamic_bytes += (unsigned)s_hero_vert_cap * (unsigned)sizeof(MeshVertex);
+    if (s_hero_ibo != NULL)
+        s_dynamic_bytes += (unsigned)s_hero_index_count * 2u;
+    if (s_zombie_ibo != NULL)
+        s_dynamic_bytes += (unsigned)s_zombie_index_count * 2u;
+    for (i = 0; i < R3D_NEAR_ZOMBIES; i++)
+        if (s_zombie_vbo[i] != NULL)
+            s_dynamic_bytes += (unsigned)s_zombie_vert_cap * (unsigned)sizeof(MeshVertex);
+    if (s_zombie_far_vbo != NULL)
+        s_dynamic_bytes += (unsigned)s_zombie_vert_cap * (unsigned)sizeof(MeshVertex);
+    for (i = 0; i < WEAPON_COUNT; i++) {
+        if (s_gpm_gun_mesh[i].verts != NULL)
+            s_dynamic_bytes += (unsigned)s_gpm_gun_mesh[i].vert_count *
+                               (unsigned)sizeof(MeshVertex);
+        if (s_gpm_gun_mesh[i].ibo != NULL)
+            s_dynamic_bytes += (unsigned)s_gpm_gun_mesh[i].index_count * 2u;
+    }
+}
+
+/* Releases every GPU buffer derived from imported GPM data (but not the
+ * GpmModel structs themselves, which r3d_assets_free owns). */
+static void r3d_model_runtime_free(void)
+{
+    r3d_skin_buffers_free();
+    r3d_gun_meshes_free();
+    s_gpm_hero_ready = false;
+}
+
+/* (Re)builds gun meshes and hero/zombie skinning buffers from whatever the
+ * current s_gpm_* models are.  Safe after a reload; returns false if any layer
+ * could not be prepared (rendering then uses that layer's fallback). */
+static bool r3d_model_runtime_build(void)
+{
+    bool ok = true;
+    int w, z;
+
+    r3d_gun_meshes_build();
+    for (w = 0; w < WEAPON_COUNT; w++) {
+        if (s_gpm_gun_ok[w] && s_gpm_gun_mesh[w].verts == NULL)
+            ok = false;
+    }
+
+    s_gpm_hero_ready = false;
+    if (s_gpm_hero_ok) {
+        if (r3d_hero_buffers_alloc(&s_gpm_hero)) {
+            r3d_hero_configure(&s_gpm_hero);
+            s_gpm_hero_ready = true;
+        } else {
+            ok = false;
+        }
+    }
+
+    for (z = 0; z < R3D_NEAR_ZOMBIES; z++)
+        s_zombie_slot_inited[z] = false;
+    s_zombie_far_inited = false;
+    if (s_gpm_zombie_ok) {
+        if (r3d_alloc_skin_zombie()) {
+            skin_init(&s_zombie_far_skin, &s_gpm_zombie);
+            s_zombie_far_inited = true;
+        } else {
+            ok = false;
+        }
+    }
+
+    r3d_dynamic_bytes_update();
+    r3d_update_model_sources();
+    return ok;
+}
 /* ------------------------------------------------------------------ */
 /* imported hero                                                      */
 /* ------------------------------------------------------------------ */
@@ -1802,7 +2365,7 @@ static void hero_draw_gpm(const Player *player, const C3D_Mtx *view,
     hero_gpm_draw_attachments(&root_view, &root);
 
     /* --- third-person gun on the wrist/hand bone ------------------ */
-    if (s_gpm_gun_ok[weapon] && s_gpm_gun_mesh[weapon].vbo != NULL) {
+    if (s_gpm_gun_ok[weapon] && s_gpm_gun_mesh[weapon].verts != NULL) {
         if (s_hero_bone_wrist >= 0) {
             static const Vec3 tp_pos[WEAPON_COUNT] = {
                 { 0.0f, -0.010f, 0.080f },  /* flintlock */
@@ -1822,7 +2385,7 @@ static void hero_draw_gpm(const Player *player, const C3D_Mtx *view,
             Mtx_Multiply(&attach, &pose, &local);
             Mtx_Multiply(&mv, &root_view, &attach);
             C3D_CullFace(GPU_CULL_NONE);
-            draw_mesh_mv(&mv, &s_gpm_gun_mesh[weapon], 1.0f, 1.0f, 1.0f, 0.10f);
+            draw_gpm_gun(&mv, weapon, 0.10f);
             C3D_CullFace(GPU_CULL_BACK_CCW);
             if (muzzle != NULL) {
                 Vec3 ml = s_gpm_gun_muzzle_local[weapon];
@@ -1837,7 +2400,7 @@ static void hero_draw_gpm(const Player *player, const C3D_Mtx *view,
                          v3(0.0f, -9.0f, 0.0f), s_gpm_gun_scale[weapon]);
             Mtx_Multiply(&mv, &root_view, &local);
             C3D_CullFace(GPU_CULL_NONE);
-            draw_mesh_mv(&mv, &s_gpm_gun_mesh[weapon], 1.0f, 1.0f, 1.0f, 0.10f);
+            draw_gpm_gun(&mv, weapon, 0.10f);
             C3D_CullFace(GPU_CULL_BACK_CCW);
             if (muzzle != NULL) {
                 C3D_FVec mp = Mtx_MultiplyFVecH(&mv, FVec4_New(0.0f, 0.02f, 0.3f, 1.0f));
@@ -1922,11 +2485,7 @@ static void zombie_gpm_model(C3D_Mtx *model, const Zombie *z)
     float height;
     float scale;
 
-    switch (z->type) {
-    case ZOMBIE_RUNNER: height = 1.60f; break;
-    case ZOMBIE_BRUTE:  height = 2.30f; break;
-    default:            height = 1.70f; break;
-    }
+    height = zombie_type_height(z->type);
     scale = height / (s_gpm_zombie.bbox_max.y - s_gpm_zombie.bbox_min.y);
     Mtx_Identity(model);
     Mtx_Translate(model, z->pos.x, z->pos.y, z->pos.z, true);
@@ -1953,6 +2512,10 @@ static void zombie_gpm_tint(const Zombie *z, float *r, float *g, float *b)
         break;
     case ZOMBIE_BRUTE:
         *r = 1.18f; *g = 0.97f; *b = 0.88f;
+        break;
+    case ZOMBIE_FOREMAN:
+        /* charred hide; the additive red eyes sell the boss */
+        *r = 0.40f; *g = 0.35f; *b = 0.34f;
         break;
     default:
         break;
@@ -1991,6 +2554,7 @@ static void draw_zombies_gpm(const GraveGame *game, const C3D_Mtx *view,
     ZDrawEntry list[R3D_MAX_ZDRAWS];
     int n = 0, i, j;
     int budget = R3D_SKIN_BUDGET - (hero_visible ? s_hero_vert_cap : 0);
+    int near_cap = R3D_NEAR_ZOMBIES;
     int slot = 0;
     bool far_ready = false;
     C3D_Mtx mv;
@@ -2012,6 +2576,11 @@ static void draw_zombies_gpm(const GraveGame *game, const C3D_Mtx *view,
         n++;
     }
 
+    /* Crowded waves: one fewer fully-skinned zombie keeps the frame under the
+     * vsync budget (the extra instance costs ~4.5k skinned verts). */
+    if (n > 8)
+        near_cap = 3;
+
     /* nearest first (insertion sort: n is small) */
     for (i = 1; i < n; i++) {
         ZDrawEntry e = list[i];
@@ -2026,7 +2595,7 @@ static void draw_zombies_gpm(const GraveGame *game, const C3D_Mtx *view,
     for (i = 0; i < n; i++) {
         const Zombie *z = &game->zombies[list[i].index];
         bool can_skin = (list[i].dist2 <= R3D_ZOMBIE_LOD_DIST * R3D_ZOMBIE_LOD_DIST) &&
-                        (slot < R3D_NEAR_ZOMBIES) &&
+                        (slot < near_cap) &&
                         (budget >= s_zombie_vert_count);
         if (can_skin) {
             int clip;
@@ -2044,6 +2613,16 @@ static void draw_zombies_gpm(const GraveGame *game, const C3D_Mtx *view,
             count = skin_vertices(inst, (SkinVertex *)s_zombie_vbo[slot],
                                   s_zombie_vert_cap);
             if (count > 0) {
+                if (z->type == ZOMBIE_FOREMAN && s_zombie_bone_head >= 0) {
+                    C3D_Mtx model;
+                    const float *bw = inst->world[s_zombie_bone_head];
+                    C3D_FVec hp;
+                    zombie_gpm_model(&model, z);
+                    hp = Mtx_MultiplyFVecH(&model,
+                                           FVec4_New(bw[3], bw[7], bw[11], 1.0f));
+                    s_boss_head_pos = v3(hp.x, hp.y, hp.z);
+                    s_boss_head_valid = true;
+                }
                 s_skin_verts_frame += (unsigned)count;
                 s_skin_bones_frame += s_gpm_zombie.bone_count;
                 s_skin_instances_frame++;
@@ -2180,7 +2759,7 @@ static void draw_first_person_gun_gpm(const GraveGame *game, WeaponId weapon,
               s_gpm_gun_scale[weapon] * s_gpm_fp_scale[weapon],
               s_gpm_gun_scale[weapon] * s_gpm_fp_scale[weapon]);
     C3D_CullFace(GPU_CULL_NONE);
-    draw_mesh_mv(&model, &s_gpm_gun_mesh[weapon], 1.0f, 1.0f, 1.0f, 0.18f);
+    draw_gpm_gun(&model, weapon, 0.18f);
     C3D_CullFace(GPU_CULL_BACK_CCW);
 
     if (muzzle_out != NULL) {
@@ -2190,23 +2769,6 @@ static void draw_first_person_gun_gpm(const GraveGame *game, WeaponId weapon,
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* imported model helpers used by the rest of the renderer            */
-/* ------------------------------------------------------------------ */
-
-
-static void r3d_bake_gun_meshes(MeshVertex *scratch, int scratch_cap)
-{
-    int w;
-    for (w = 0; w < WEAPON_COUNT; w++) {
-        if (!s_gpm_gun_ok[w] || s_gpm_gun[w].data == NULL)
-            continue;
-        if (!gpm_bake_static_mesh(&s_gpm_gun_mesh[w], &s_gpm_gun[w],
-                                  scratch, scratch_cap)) {
-            r3d_asset_log("gun[%d]: static mesh bake failed", w);
-        }
-    }
-}
 
 /* ------------------------------------------------------------------ */
 /* world drawing                                                      */
@@ -2241,7 +2803,7 @@ static void draw_world_geometry(const GraveGame *game, const C3D_Mtx *view,
     /* first person: viewmodel goes in before the world so it is never clipped
      * into a wall (depth is already correct from the near camera position) */
     if (first_person) {
-        if (s_gpm_gun_ok[weapon] && s_gpm_gun_mesh[weapon].vbo != NULL) {
+        if (s_gpm_gun_ok[weapon] && s_gpm_gun_mesh[weapon].verts != NULL) {
             draw_first_person_gun_gpm(game, weapon, &fp_muzzle_cam);
             fp_muzzle_valid = true;
         } else {
@@ -2251,11 +2813,18 @@ static void draw_world_geometry(const GraveGame *game, const C3D_Mtx *view,
 
     /* distant hills: plain silhouettes, no culling assumptions */
     C3D_CullFace(GPU_CULL_NONE);
-    draw_mesh_mv(view, &s_hills, 1.0f, 1.0f, 1.0f, 1.0f);
+    {
+        const R3dZonePalette *pal = r3d_palette();
+        draw_mesh_mv(view, &s_hills, pal->hills_r, pal->hills_g, pal->hills_b, 1.0f);
+    }
     C3D_CullFace(GPU_CULL_BACK_CCW);
 
     /* ground */
-    draw_mesh_mv(view, &s_ground, 1.0f, 1.0f, 1.0f, 0.0f);
+    {
+        const R3dZonePalette *pal = r3d_palette();
+        draw_mesh_mv(view, &s_ground, pal->ground_r, pal->ground_g,
+                     pal->ground_b, 0.0f);
+    }
 
     /* blob shadows for props + characters */
     draw_shadows(game, view, first_person);
@@ -2301,6 +2870,7 @@ static void draw_world_geometry(const GraveGame *game, const C3D_Mtx *view,
         effects_build(game, cam_pos, fwd, right, up, muzzle,
                       flash > 0.0f, flash, first_person ? 0.30f : 1.0f);
     }
+    zone_glow_build(game, view, right, up);
     begin_additive();
     dyn_flush(view, 1.0f, 1.0f, 1.0f, 1.0f);
     end_additive();
@@ -2314,7 +2884,7 @@ static void draw_eye(const GraveGame *game, const C3D_Mtx *projection,
     WeaponId weapon;
     Vec3 muzzle = *cam_pos;
 
-    C3D_RenderTargetClear(target, C3D_CLEAR_ALL, R3D_CLEAR_COLOR, 0);
+    C3D_RenderTargetClear(target, C3D_CLEAR_ALL, r3d_palette()->clear_color, 0);
     C3D_FrameDrawOn(target);
     bind_pass_state(projection, view);
 
@@ -2480,6 +3050,12 @@ static void build_meshes(MeshVertex *scratch, int scratch_cap, bool skip_zombie_
     if (s_hero_rig == NULL)
         s_hero_rig = &s_hero_builtin;
 
+    r3d_asset_log("props: timber=%u cart=%u ore=%u lantern=%u verts",
+                  s_props[PROP_TIMBER].vertex_count,
+                  s_props[PROP_CART].vertex_count,
+                  s_props[PROP_ORE].vertex_count,
+                  s_props[PROP_LANTERN].vertex_count);
+
     s_mesh_verts = s_ground.vertex_count + s_hills.vertex_count +
                    s_shadow.vertex_count + s_unit_cube.vertex_count;
     for (i = 0; i < PROP_KIND_COUNT; i++)
@@ -2504,6 +3080,12 @@ void r3d_init(void)
 
     if (s_initialized)
         return;
+
+    {
+        int slot;
+        for (slot = 0; slot < R3D_MODEL_COUNT; slot++)
+            snprintf(s_model_source_text[slot], 64, "not loaded");
+    }
 
     gfxInitDefault();
     C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
@@ -2560,41 +3142,13 @@ void r3d_init(void)
     build_meshes(scratch, R3D_SCRATCH_VERTS, s_gpm_zombie_ok);
     if (s_gpm_hero_ok)
         r3d_build_wolf_attachments(scratch, R3D_SCRATCH_VERTS);
-    r3d_bake_gun_meshes(scratch, R3D_SCRATCH_VERTS);
+
     linearFree(scratch);
 
-    /* skinning runtime (dynamic VBOs are separate linearAlloc buffers) */
-    s_gpm_hero_ready = false;
-    if (s_gpm_hero_ok && r3d_hero_buffers_alloc(&s_gpm_hero)) {
-        r3d_hero_configure(&s_gpm_hero);
-        s_gpm_hero_ready = true;
-    }
-    if (s_gpm_zombie_ok && r3d_alloc_skin_zombie()) {
-        int z;
-        for (z = 0; z < R3D_NEAR_ZOMBIES; z++)
-            s_zombie_slot_inited[z] = false;
-        s_zombie_far_inited = false;
-        skin_init(&s_zombie_far_skin, &s_gpm_zombie);
-        s_zombie_far_inited = true;
-    }
+    /* imported model runtime (indexed gun meshes + hero/zombie skin buffers) */
+    (void)r3d_model_runtime_build();
 
     s_mesh_bytes = (unsigned)s_arena.used;
-
-    s_dynamic_bytes = 0;
-    if (s_hero_vbo != NULL)
-        s_dynamic_bytes += (unsigned)s_hero_vert_cap * (unsigned)sizeof(MeshVertex);
-    if (s_hero_ibo != NULL)
-        s_dynamic_bytes += (unsigned)s_hero_index_count * 2u;
-    if (s_zombie_ibo != NULL)
-        s_dynamic_bytes += (unsigned)s_zombie_index_count * 2u;
-    {
-        int z;
-        for (z = 0; z < R3D_NEAR_ZOMBIES; z++)
-            if (s_zombie_vbo[z] != NULL)
-                s_dynamic_bytes += (unsigned)s_zombie_vert_cap * (unsigned)sizeof(MeshVertex);
-        if (s_zombie_far_vbo != NULL)
-            s_dynamic_bytes += (unsigned)s_zombie_vert_cap * (unsigned)sizeof(MeshVertex);
-    }
 
     s_dyn_mem = linearAlloc((size_t)R3D_DYN_VERTS * sizeof(MeshVertex));
     s_dyn_verts = (MeshVertex *)s_dyn_mem;
@@ -2609,32 +3163,10 @@ void r3d_init(void)
 
 void r3d_fini(void)
 {
-    int i;
-
     if (!s_initialized)
         return;
 
-    /* dynamic skinned vertex buffers (linearAlloc'd separately from the arena) */
-    if (s_hero_vbo != NULL)
-        linearFree(s_hero_vbo);
-    s_hero_vbo = NULL;
-    if (s_hero_ibo != NULL)
-        linearFree(s_hero_ibo);
-    s_hero_ibo = NULL;
-    for (i = 0; i < R3D_NEAR_ZOMBIES; i++) {
-        if (s_zombie_vbo[i] != NULL)
-            linearFree(s_zombie_vbo[i]);
-        s_zombie_vbo[i] = NULL;
-        s_zombie_slot_inited[i] = false;
-    }
-    if (s_zombie_far_vbo != NULL)
-        linearFree(s_zombie_far_vbo);
-    s_zombie_far_vbo = NULL;
-    s_zombie_far_inited = false;
-    if (s_zombie_ibo != NULL)
-        linearFree(s_zombie_ibo);
-    s_zombie_ibo = NULL;
-    s_gpm_hero_ready = false;
+    r3d_model_runtime_free();
     r3d_assets_free();
 
     if (s_dyn_mem != NULL)
@@ -2771,10 +3303,13 @@ void r3d_draw_world(const GraveGame *game, float dt)
     s_skin_bones_frame = 0;
     s_skin_instances_frame = 0;
     s_draw_dt = dt;
+    s_boss_head_valid = false;
+    boss_effects_update(game, dt);
 
     title = game != NULL && game->phase == GAME_PHASE_TITLE;
     if (title)
         s_title_clock += dt;
+    r3d_zone_select(title || game == NULL ? ZONE_ASHEN_MILL : game->zone);
 
     /* camera */
     if (title) {
@@ -2815,7 +3350,7 @@ void r3d_draw_world(const GraveGame *game, float dt)
     } else {
         build_projection(&projection, fov, 0.0f);
         if (title) {
-            C3D_RenderTargetClear(s_target_top, C3D_CLEAR_ALL, R3D_CLEAR_COLOR, 0);
+            C3D_RenderTargetClear(s_target_top, C3D_CLEAR_ALL, r3d_palette()->clear_color, 0);
             C3D_FrameDrawOn(s_target_top);
             bind_pass_state(&projection, &view);
             draw_title_diorama(game, &cam_pos, &fwd, &right, &up, &view);
@@ -2896,8 +3431,10 @@ bool r3d_set_hero_model(const struct GpmModel *model)
         return false;
     }
     s_hero_model_borrowed = model;
+    s_src_hero = R3D_SRC_CUSTOM;
     r3d_hero_configure(model);
     s_gpm_hero_ready = true;
+    r3d_update_model_sources();
     r3d_asset_log("hero: hot-swapped to caller model (%u verts)",
                   model->vertex_count);
     return true;
@@ -2914,14 +3451,20 @@ bool r3d_reload_hero_model(void)
     gpm_destroy(&s_gpm_hero);
     s_gpm_hero_ok = false;
     emb = r3d_hero_embedded_model();
-    if (!r3d_load_one_model(&s_gpm_hero, &s_gpm_hero_ok, "hero", &emb, true))
+    if (!r3d_load_one_model(&s_gpm_hero, &s_gpm_hero_ok, "hero", &emb, true,
+                            &s_src_hero)) {
+        r3d_update_model_sources();
         return false;
+    }
     if (!r3d_hero_buffers_alloc(&s_gpm_hero)) {
         s_gpm_hero_ready = false;
+        r3d_update_model_sources();
         return false;
     }
     r3d_hero_configure(&s_gpm_hero);
     s_gpm_hero_ready = true;
+    r3d_dynamic_bytes_update();
+    r3d_update_model_sources();
     return true;
 }
 
@@ -2932,6 +3475,42 @@ const struct GpmModel *r3d_hero_model(void)
     if (s_hero_model_borrowed != NULL)
         return s_hero_model_borrowed;
     return s_hero_skin.model;
+}
+bool r3d_reload_all_models(void)
+{
+    MeshVertex *scratch;
+
+    if (!s_initialized)
+        return false;
+
+    s_hero_model_borrowed = NULL;
+    r3d_model_runtime_free();
+    r3d_assets_free();
+    r3d_assets_init();
+
+    /* The procedural wolf head/tail are only built when an imported hero is
+     * available; build them on demand if the reload just enabled the GPM path. */
+    if (s_gpm_hero_ok && s_wolf_head.vbo == NULL) {
+        scratch = (MeshVertex *)linearAlloc((size_t)R3D_SCRATCH_VERTS *
+                                            sizeof(MeshVertex));
+        if (scratch != NULL) {
+            r3d_build_wolf_attachments(scratch, R3D_SCRATCH_VERTS);
+            linearFree(scratch);
+        } else {
+            r3d_asset_log("attach: scratch alloc failed on reload");
+        }
+    }
+
+    return r3d_model_runtime_build();
+}
+
+const char *r3d_model_source(R3dModelSlot slot)
+{
+    if ((int)slot < 0 || (int)slot >= R3D_MODEL_COUNT)
+        return "not loaded";
+    if (s_model_source_text[slot][0] == '\0')
+        return "not loaded";
+    return s_model_source_text[slot];
 }
 
 /* ------------------------------------------------------------------ */

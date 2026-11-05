@@ -621,6 +621,205 @@ static void prop_gate(MeshBuilder *b, C3D_Mtx *id)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* v0.3 OLD MINE props                                                */
+/* ------------------------------------------------------------------ */
+
+static void prop_timber(MeshBuilder *b, C3D_Mtx *id)
+{
+    static const float timber[3]      = { 0.31f, 0.22f, 0.14f };
+    static const float timber_dark[3] = { 0.21f, 0.15f, 0.09f };
+    static const float timber_light[3]= { 0.40f, 0.29f, 0.18f };
+    static const float rope[3]        = { 0.55f, 0.44f, 0.28f };
+    C3D_Mtx m;
+    int i;
+
+    /* portal: two posts, crossbeam, corner braces */
+    mesh_builder_box(b, id, -0.42f, 0.44f, 0.0f, 0.065f, 0.44f, 0.085f,
+                     timber[0], timber[1], timber[2]);
+    mesh_builder_box(b, id, 0.42f, 0.44f, 0.0f, 0.065f, 0.44f, 0.085f,
+                     timber[0], timber[1], timber[2]);
+    mesh_builder_box(b, id, 0.0f, 0.92f, 0.0f, 0.50f, 0.055f, 0.075f,
+                     timber_light[0], timber_light[1], timber_light[2]);
+    for (i = -1; i <= 1; i += 2) {
+        xf_reset(&m);
+        Mtx_Translate(&m, 0.30f * (float)i, 0.80f, 0.0f, true);
+        Mtx_RotateZ(&m, 0.70f * (float)i, true);
+        mesh_builder_box(b, &m, 0.0f, 0.0f, 0.0f, 0.17f, 0.030f, 0.055f,
+                         timber_dark[0], timber_dark[1], timber_dark[2]);
+    }
+    /* plank roof (suggest the tunnel behind the portal) */
+    for (i = 0; i < 4; i++) {
+        float z = -0.33f + 0.22f * (float)i;
+        mesh_builder_box(b, id, 0.0f, 0.985f, z, 0.50f, 0.022f, 0.105f,
+                         (i & 1) ? timber_light[0] : timber[0],
+                         (i & 1) ? timber_light[1] : timber[1],
+                         (i & 1) ? timber_light[2] : timber[2]);
+    }
+    /* rope lashing on the right post */
+    mesh_builder_box(b, id, 0.42f, 0.50f, 0.0f, 0.083f, 0.022f, 0.10f,
+                     rope[0], rope[1], rope[2]);
+    mesh_builder_box(b, id, 0.42f, 0.56f, 0.0f, 0.083f, 0.018f, 0.10f,
+                     rope[0] * 0.8f, rope[1] * 0.8f, rope[2] * 0.8f);
+}
+
+static void prop_cart(MeshBuilder *b, C3D_Mtx *id)
+{
+    static const float wood[3]      = { 0.45f, 0.30f, 0.18f };
+    static const float wood_dark[3] = { 0.30f, 0.20f, 0.12f };
+    static const float metal[3]     = { 0.33f, 0.31f, 0.29f };
+    static const float rust[3]      = { 0.44f, 0.29f, 0.18f };
+    C3D_Mtx m;
+    int side, along;
+
+    /* open-topped plank body */
+    mesh_builder_box(b, id, 0.0f, 0.33f, 0.0f, 0.34f, 0.055f, 0.46f,
+                     wood_dark[0], wood_dark[1], wood_dark[2]);
+    mesh_builder_box(b, id, 0.0f, 0.47f, 0.0f, 0.32f, 0.13f, 0.44f,
+                     wood_dark[0] * 0.75f, wood_dark[1] * 0.75f, wood_dark[2] * 0.75f);
+    mesh_builder_box(b, id, -0.315f, 0.50f, 0.0f, 0.035f, 0.15f, 0.46f,
+                     wood[0], wood[1], wood[2]);
+    mesh_builder_box(b, id, 0.315f, 0.50f, 0.0f, 0.035f, 0.15f, 0.46f,
+                     wood[0], wood[1], wood[2]);
+    mesh_builder_box(b, id, 0.0f, 0.50f, -0.435f, 0.34f, 0.15f, 0.035f,
+                     wood[0], wood[1], wood[2]);
+    mesh_builder_box(b, id, 0.0f, 0.50f, 0.435f, 0.34f, 0.15f, 0.035f,
+                     wood[0], wood[1], wood[2]);
+    /* iron rim + corner straps */
+    mesh_builder_box(b, id, 0.0f, 0.655f, 0.0f, 0.355f, 0.018f, 0.475f,
+                     metal[0], metal[1], metal[2]);
+    for (side = -1; side <= 1; side += 2) {
+        for (along = -1; along <= 1; along += 2) {
+            mesh_builder_box(b, id, 0.315f * (float)side, 0.50f,
+                             0.435f * (float)along,
+                             0.045f, 0.155f, 0.045f,
+                             metal[0], metal[1], metal[2]);
+        }
+    }
+    /* wheels (cylinder axis rotated from +Y onto X) */
+    for (side = -1; side <= 1; side += 2) {
+        for (along = -1; along <= 1; along += 2) {
+            xf_reset(&m);
+            Mtx_Translate(&m, 0.375f * (float)side, 0.19f,
+                          0.31f * (float)along, true);
+            Mtx_RotateZ(&m, PI_F * 0.5f, true);
+            mesh_builder_cyl(b, &m, 0.0f, 0.0f, 0.0f, 0.175f, 0.055f, 8, true,
+                             wood_dark[0], wood_dark[1], wood_dark[2]);
+            mesh_builder_cyl(b, &m, 0.0f, 0.030f * (float)side, 0.0f, 0.062f,
+                             0.09f, 6, true, rust[0], rust[1], rust[2]);
+        }
+    }
+    /* push handle at the back */
+    xf_reset(&m);
+    Mtx_Translate(&m, 0.0f, 0.44f, -0.56f, true);
+    Mtx_RotateX(&m, -0.16f, true);
+    mesh_builder_box(b, &m, -0.19f, 0.0f, 0.0f, 0.022f, 0.022f, 0.17f,
+                     metal[0], metal[1], metal[2]);
+    mesh_builder_box(b, &m, 0.19f, 0.0f, 0.0f, 0.022f, 0.022f, 0.17f,
+                     metal[0], metal[1], metal[2]);
+    mesh_builder_box(b, &m, 0.0f, 0.0f, -0.13f, 0.20f, 0.020f, 0.020f,
+                     rust[0], rust[1], rust[2]);
+}
+
+static void prop_ore(MeshBuilder *b, C3D_Mtx *id)
+{
+    static const float rock[3]       = { 0.27f, 0.26f, 0.26f };
+    static const float rock_dark[3]  = { 0.17f, 0.16f, 0.17f };
+    static const float amber[3]      = { 1.00f, 0.70f, 0.26f };
+    static const float amber_deep[3] = { 0.62f, 0.38f, 0.12f };
+    static const float teal[3]       = { 0.34f, 0.92f, 0.82f };
+    C3D_Mtx m;
+    int i;
+
+    /* broken rock base */
+    mesh_builder_box(b, id, 0.0f, 0.10f, 0.0f, 0.40f, 0.10f, 0.33f,
+                     rock[0], rock[1], rock[2]);
+    xf_reset(&m);
+    Mtx_Translate(&m, 0.16f, 0.15f, 0.08f, true);
+    Mtx_RotateZ(&m, 0.34f, true);
+    mesh_builder_box(b, &m, 0.0f, 0.0f, 0.0f, 0.20f, 0.075f, 0.16f,
+                     rock_dark[0], rock_dark[1], rock_dark[2]);
+    xf_reset(&m);
+    Mtx_Translate(&m, -0.18f, 0.14f, -0.10f, true);
+    Mtx_RotateZ(&m, -0.26f, true);
+    mesh_builder_box(b, &m, 0.0f, 0.0f, 0.0f, 0.17f, 0.065f, 0.14f,
+                     rock[0] * 0.85f, rock[1] * 0.85f, rock[2] * 0.85f);
+
+    /* crystal shards: one tall amber anchor + amber/teal satellites */
+    xf_reset(&m);
+    Mtx_Translate(&m, 0.0f, 0.16f, 0.0f, true);
+    mesh_builder_cone(b, &m, 0.0f, 0.0f, 0.0f, 0.105f, 0.0f, 0.66f, 3, true,
+                      amber[0], amber[1], amber[2]);
+    {
+        static const float shard_amber[4][3] = {
+            { 0.16f, 0.18f, 0.10f, },
+            { -0.14f, 0.20f, 0.12f, },
+            { 0.10f, 0.22f, -0.14f, },
+            { -0.08f, 0.17f, -0.10f, },
+        };
+        for (i = 0; i < 4; i++) {
+            xf_reset(&m);
+            Mtx_Translate(&m, shard_amber[i][0], shard_amber[i][1],
+                          shard_amber[i][2], true);
+            Mtx_RotateZ(&m, 0.30f * (float)(i - 1), true);
+            Mtx_RotateX(&m, 0.24f * (float)((i & 1) ? 1 : -1), true);
+            mesh_builder_cone(b, &m, 0.0f, 0.0f, 0.0f, 0.062f, 0.0f,
+                              0.40f - 0.05f * (float)(i & 1), 3, true,
+                              (i == 2) ? teal[0] : amber_deep[0],
+                              (i == 2) ? teal[1] : amber_deep[1],
+                              (i == 2) ? teal[2] : amber_deep[2]);
+        }
+    }
+    /* little glowing chips at the base */
+    for (i = 0; i < 3; i++) {
+        float a = 0.8f + 2.1f * (float)i;
+        mesh_builder_box(b, id, cosf(a) * 0.26f, 0.10f, sinf(a) * 0.22f,
+                         0.035f, 0.028f, 0.030f,
+                         (i == 1) ? teal[0] : amber[0],
+                         (i == 1) ? teal[1] : amber[1],
+                         (i == 1) ? teal[2] : amber[2]);
+    }
+}
+
+static void prop_lantern(MeshBuilder *b, C3D_Mtx *id)
+{
+    static const float post[3]  = { 0.29f, 0.21f, 0.14f };
+    static const float metal[3] = { 0.24f, 0.22f, 0.20f };
+    static const float glow[3]  = { 1.00f, 0.74f, 0.32f };
+    static const float dim[3]   = { 0.55f, 0.38f, 0.16f };
+    int side;
+
+    /* post + cross arm */
+    mesh_builder_box(b, id, 0.0f, 0.46f, 0.0f, 0.052f, 0.46f, 0.052f,
+                     post[0], post[1], post[2]);
+    mesh_builder_box(b, id, 0.0f, 0.045f, 0.0f, 0.13f, 0.045f, 0.13f,
+                     metal[0], metal[1], metal[2]);
+    mesh_builder_box(b, id, 0.155f, 0.90f, 0.0f, 0.16f, 0.026f, 0.026f,
+                     post[0], post[1], post[2]);
+    mesh_builder_box(b, id, 0.305f, 0.865f, 0.0f, 0.012f, 0.030f, 0.012f,
+                     metal[0], metal[1], metal[2]);
+    /* lantern cage: plates, four corner posts and a glowing core */
+    mesh_builder_box(b, id, 0.305f, 0.825f, 0.0f, 0.072f, 0.014f, 0.072f,
+                     metal[0], metal[1], metal[2]);
+    mesh_builder_box(b, id, 0.305f, 0.625f, 0.0f, 0.072f, 0.014f, 0.072f,
+                     metal[0], metal[1], metal[2]);
+    for (side = -1; side <= 1; side += 2) {
+        mesh_builder_box(b, id, 0.305f, 0.725f, 0.062f * (float)side,
+                         0.060f, 0.088f, 0.012f,
+                         metal[0], metal[1], metal[2]);
+        mesh_builder_box(b, id, 0.305f, 0.725f, 0.062f * (float)side,
+                         0.052f, 0.070f, 0.004f,
+                         glow[0] * 0.7f, glow[1] * 0.7f, glow[2] * 0.7f);
+    }
+    mesh_builder_box(b, id, 0.305f, 0.725f, 0.0f, 0.040f, 0.078f, 0.040f,
+                     glow[0], glow[1], glow[2]);
+    /* cap + hanger ring */
+    mesh_builder_cone(b, id, 0.305f, 0.842f, 0.0f, 0.085f, 0.012f, 0.075f, 4,
+                      true, metal[0], metal[1], metal[2]);
+    mesh_builder_cyl(b, id, 0.305f, 0.856f, 0.0f, 0.045f, 0.012f, 6, true,
+                     dim[0], dim[1], dim[2]);
+}
+
 void mesh_build_props(Mesh out[PROP_KIND_COUNT], MeshArena *arena,
                       MeshVertex *scratch, int scratch_cap)
 {
@@ -639,6 +838,10 @@ void mesh_build_props(Mesh out[PROP_KIND_COUNT], MeshArena *arena,
         case PROP_DEADTREE:   prop_deadtree(&b, &id); break;
         case PROP_WELL:       prop_well(&b, &id); break;
         case PROP_GATE:       prop_gate(&b, &id); break;
+        case PROP_TIMBER:     prop_timber(&b, &id); break;
+        case PROP_CART:       prop_cart(&b, &id); break;
+        case PROP_ORE:        prop_ore(&b, &id); break;
+        case PROP_LANTERN:    prop_lantern(&b, &id); break;
         default:              prop_crate(&b, &id); break;
         }
         (void)mesh_commit(&b, &out[kind], arena);

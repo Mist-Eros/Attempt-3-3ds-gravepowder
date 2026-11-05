@@ -91,4 +91,29 @@ bool r3d_set_hero_model(const struct GpmModel *model);
 bool r3d_reload_hero_model(void);
 const struct GpmModel *r3d_hero_model(void);
 
+/* ------------------------------------------------------------------ */
+/* model slots: reload everything + report load sources (v0.3)        */
+/* ------------------------------------------------------------------ */
+
+/* One slot per importable model group, for the wardrobe / model-swap UI. */
+typedef enum {
+    R3D_MODEL_HERO = 0,
+    R3D_MODEL_ZOMBIE,
+    R3D_MODEL_GUNS,
+    R3D_MODEL_COUNT
+} R3dModelSlot;
+
+/* Re-reads the hero, zombie and all gun models (SD override first, embedded
+ * second, procedural fallback).  Safe to call at any time after r3d_init();
+ * framebuffers/meshes stay valid and rendering falls back gracefully if a
+ * layer fails to load.  Returns true when every layer that could be reloaded
+ * did reload without allocation errors. */
+bool r3d_reload_all_models(void);
+
+/* Human-readable provenance of the model currently used by a slot, e.g.
+ * "SD: hero.gpm", "embedded", "procedural fallback", "custom model"
+ * (r3d_set_hero_model) or "not loaded".  Never NULL; valid until the next
+ * reload.  The WARDROBE page can print this verbatim. */
+const char *r3d_model_source(R3dModelSlot slot);
+
 #endif /* GRAVEPOWDER_RENDER3D_H */
