@@ -18,7 +18,7 @@
 
 /* Release version shown in the UI footer.  Single source of truth: bump this
  * one macro per release (no other file hard-codes the version string). */
-#define GRAVEPOWDER_VERSION "v0.4"
+#define GRAVEPOWDER_VERSION "v0.5"
 
 #include <stdbool.h>
 
@@ -66,7 +66,8 @@ typedef enum {
     UI_ACTION_RETRY,          /* game-over -> restart zone                */
     /* v0.4 appended actions. */
     UI_ACTION_TOGGLE_GYRO,    /* settings: cycle GYRO ON/OFF/INVERT       */
-    UI_ACTION_CYCLE_GYRO_SENS /* settings: cycle GYRO SPEED LOW/MED/HIGH  */
+    UI_ACTION_CYCLE_GYRO_SENS,/* settings: cycle GYRO SPEED LOW/MED/HIGH  */
+    UI_ACTION_CYCLE_AIM_ASSIST/* settings: cycle AIM ASSIST OFF/NORMAL/STRONG */
 } UiAction;
 
 /* Rect type for hit-testing (UI space: 0,0 = bottom screen top-left). */
@@ -116,6 +117,7 @@ UiRect ui_settings_camera_rect(void);
 UiRect ui_settings_sens_rect(void);
 UiRect ui_settings_gyro_rect(void);
 UiRect ui_settings_gyro_sens_rect(void);
+UiRect ui_settings_aim_rect(void);
 UiRect ui_settings_invert_rect(void);
 UiRect ui_settings_mute_rect(void);
 UiRect ui_settings_save_rect(void);

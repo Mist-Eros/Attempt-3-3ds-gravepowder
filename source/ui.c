@@ -47,7 +47,6 @@ static const u32 COL_BONE_DIM  = CLR(0xC9, 0xBE, 0xA2, 0xFF);
 static const u32 COL_BLOOD     = CLR(0x8E, 0x23, 0x18, 0xFF);
 static const u32 COL_BLOOD_HI  = CLR(0xD6, 0x49, 0x2F, 0xFF);
 static const u32 COL_ROT       = CLR(0x7C, 0x8C, 0x44, 0xFF);
-static const u32 COL_STAM      = CLR(0x8A, 0x94, 0x52, 0xFF);
 static const u32 COL_HILITE    = CLR(0xF7, 0xD9, 0x8A, 0xFF);
 static const u32 COL_MAP_BG    = CLR(0x2A, 0x21, 0x16, 0xFF);
 static const u32 COL_MAP_GRID  = CLR(0x3A, 0x2F, 0x20, 0xFF);
@@ -298,13 +297,13 @@ UiRect ui_shop_item_rect(int item)
 
 UiRect ui_title_continue_rect(void)
 {
-    UiRect r = { 56.0f, 122.0f, 208.0f, 24.0f };
+    UiRect r = { 56.0f, 112.0f, 208.0f, 36.0f };
     return r;
 }
 
 UiRect ui_title_newgame_rect(void)
 {
-    UiRect r = { 56.0f, 148.0f, 208.0f, 22.0f };
+    UiRect r = { 56.0f, 154.0f, 208.0f, 28.0f };
     return r;
 }
 
@@ -326,11 +325,6 @@ UiRect ui_pause_wardrobe_rect(void)
     return r;
 }
 
-UiRect ui_settings_save_rect(void)
-{
-    UiRect r = { 40.0f, 168.0f, 240.0f, 19.0f };
-    return r;
-}
 
 UiRect ui_save_erase_rect(void)
 {
@@ -377,11 +371,11 @@ UiRect ui_results_play_rect(void)
 UiRect ui_world_node_rect(int node)
 {
     if (node == 1) {
-        UiRect b = { 178.0f, 78.0f, 118.0f, 42.0f };
+        UiRect b = { 178.0f, 84.0f, 118.0f, 42.0f };
         return b;
     }
     if (node == 2) {
-        UiRect o = { 178.0f, 134.0f, 118.0f, 42.0f };
+        UiRect o = { 178.0f, 140.0f, 118.0f, 42.0f };
         return o;
     }
     {
@@ -407,7 +401,7 @@ UiRect ui_pack_weapon_rect(int index)
 
 UiRect ui_title_start_rect(void)
 {
-    UiRect r = { 62.0f, 176.0f, 196.0f, 26.0f };
+    UiRect r = { 62.0f, 168.0f, 196.0f, 34.0f };
     return r;
 }
 
@@ -437,43 +431,55 @@ UiRect ui_pause_quit_rect(void)
 
 UiRect ui_settings_back_rect(void)
 {
-    UiRect r = { 40.0f, 189.0f, 240.0f, 19.0f };
+    UiRect r = { 22.0f, 196.0f, 276.0f, 26.0f };
     return r;
 }
 
 UiRect ui_settings_camera_rect(void)
 {
-    UiRect r = { 40.0f, 42.0f, 240.0f, 19.0f };
+    UiRect r = { 22.0f, 44.0f, 140.0f, 30.0f };
     return r;
 }
 
 UiRect ui_settings_sens_rect(void)
 {
-    UiRect r = { 40.0f, 63.0f, 240.0f, 19.0f };
+    UiRect r = { 22.0f, 74.0f, 140.0f, 30.0f };
     return r;
 }
 
 UiRect ui_settings_gyro_rect(void)
 {
-    UiRect r = { 40.0f, 84.0f, 240.0f, 19.0f };
+    UiRect r = { 22.0f, 104.0f, 140.0f, 30.0f };
     return r;
 }
 
 UiRect ui_settings_gyro_sens_rect(void)
 {
-    UiRect r = { 40.0f, 105.0f, 240.0f, 19.0f };
+    UiRect r = { 22.0f, 134.0f, 140.0f, 30.0f };
+    return r;
+}
+
+UiRect ui_settings_aim_rect(void)
+{
+    UiRect r = { 22.0f, 164.0f, 140.0f, 30.0f };
     return r;
 }
 
 UiRect ui_settings_invert_rect(void)
 {
-    UiRect r = { 40.0f, 126.0f, 240.0f, 19.0f };
+    UiRect r = { 164.0f, 44.0f, 134.0f, 30.0f };
     return r;
 }
 
 UiRect ui_settings_mute_rect(void)
 {
-    UiRect r = { 40.0f, 147.0f, 240.0f, 19.0f };
+    UiRect r = { 164.0f, 74.0f, 134.0f, 30.0f };
+    return r;
+}
+
+UiRect ui_settings_save_rect(void)
+{
+    UiRect r = { 164.0f, 104.0f, 134.0f, 30.0f };
     return r;
 }
 
@@ -541,14 +547,19 @@ static void draw_strip(const App *app)
               CLR(0x12, 0x10, 0x06, 0xEE));
     fill_rect(0.0f, STRIP_H - 1.0f, 320.0f, 2.0f, COL_BRASS);
 
-    /* health + stamina */
-    draw_heart(14.0f, 11.5f, 5.2f, COL_BLOOD_HI);
+    /* health + stamina (heart pulses when things go badly) */
+    if (hp_frac < 0.3f)
+        draw_heart(14.0f, 11.5f,
+                   5.2f + 1.4f * (0.5f + 0.5f * sinf(app->time * 9.0f)),
+                   COL_BLOOD_HI);
+    else
+        draw_heart(14.0f, 11.5f, 5.2f, COL_BLOOD_HI);
     bar(23.0f, 4.0f, 103.0f, 14.0f, hp_frac, COL_BLOOD_HI,
         CLR(0x3A, 0x20, 0x16, 0xFF));
     snprintf(buf, sizeof(buf), "%d / %d", (int)(p->hp + 0.5f),
              (int)(p->max_hp + 0.5f));
-    text_center(app, 74.5f, 5.5f, 0.42f, COL_INK, buf);
-    text_center(app, 74.0f, 5.0f, 0.42f, COL_BONE, buf);
+    text_center(app, 74.5f, 5.0f, 0.46f, COL_INK, buf);
+    text_center(app, 74.0f, 4.6f, 0.46f, COL_BONE, buf);
     bar(23.0f, 20.0f, 103.0f, 7.0f, stam_frac, CLR(0xBC, 0xC6, 0x7A, 0xFF),
         CLR(0x2A, 0x25, 0x16, 0xFF));
 
@@ -557,9 +568,9 @@ static void draw_strip(const App *app)
         int ammo = p->ammo[p->weapon];
         int mag = spec->magazine > 0 ? spec->magazine : 1;
 
-        text_left(app, 134.0f, 0.0f, 0.36f, COL_BONE_DIM, spec->name);
+        text_left(app, 134.0f, 0.0f, 0.40f, COL_BONE_DIM, spec->name);
         snprintf(buf, sizeof(buf), "%d / %d", ammo, mag);
-        text_left(app, 134.0f, 12.0f, 0.58f,
+        text_left(app, 134.0f, 11.0f, 0.62f,
                   ammo > 0 ? COL_BRASS_HI : COL_BLOOD_HI, buf);
         if (p->reload_timer > 0.0f && p->reload_duration > 0.0f) {
             float frac = 1.0f - p->reload_timer / p->reload_duration;
@@ -567,7 +578,7 @@ static void draw_strip(const App *app)
             bar(134.0f, 27.0f, 110.0f, 4.0f, frac, COL_BRASS_HI,
                 CLR(0x3C, 0x33, 0x20, 0xFF));
         } else if (ammo <= 0) {
-            text_left(app, 196.0f, 12.0f, 0.34f, COL_BLOOD_HI, "RELOAD");
+            text_left(app, 194.0f, 11.0f, 0.42f, COL_BLOOD_HI, "RELOAD!");
         }
     }
 
@@ -578,7 +589,7 @@ static void draw_strip(const App *app)
         paper_button(pr.x, pr.y, pr.w, pr.h, COL_BRASS_HI);
         fill_rect(pr.x + 7.0f, pr.y + 7.0f, 4.0f, 10.0f, COL_INK);
         fill_rect(pr.x + 13.0f, pr.y + 7.0f, 4.0f, 10.0f, COL_INK);
-        text_left(app, pr.x + 20.0f, pr.y + 7.0f, 0.28f, COL_INK, "PAUSE");
+        text_left(app, pr.x + 20.0f, pr.y + 6.0f, 0.34f, COL_INK, "PAUSE");
     }
 
     g_dx = save_dx;
@@ -838,9 +849,8 @@ static void draw_trail_page(const App *app)
 static void draw_area_page(const App *app)
 {
     const GraveGame *g = &app->game;
-    char buf[64];
+    char buf[48];
     float frac = 0.0f;
-    UiRect qs = { 6.0f, 180.0f, 308.0f, 18.0f };
     int secs = (int)g->zone_time;
     int rounds = 0;
     int i;
@@ -851,55 +861,30 @@ static void draw_area_page(const App *app)
     }
 
     paper_panel(6.0f, CONTENT_Y, 308.0f, 116.0f);
-    text_left(app, 14.0f, CONTENT_Y + 3.0f, 0.36f, COL_INK_SOFT,
+    text_left(app, 14.0f, CONTENT_Y + 4.0f, 0.42f, COL_INK,
               grave_zone_name(g->zone));
-    text_right(app, 306.0f, CONTENT_Y + 3.0f, 0.36f, COL_INK_SOFT, "AREA MAP");
-    /* left column: quick zone facts (three short rows, no wrapping) */
-    text_left(app, 14.0f, 82.0f, 0.36f, COL_INK_SOFT, "TIME");
+    if ((app->new_zone_mask & (1u << (unsigned)g->zone)) != 0u) {
+        fill_rect(150.0f, CONTENT_Y + 2.0f, 56.0f, 15.0f, COL_BLOOD);
+        text_center(app, 178.0f, CONTENT_Y + 3.5f, 0.34f, COL_BONE,
+                    "NEW ZONE");
+    }
+
+    /* big readable facts on the left */
+    text_left(app, 14.0f, 84.0f, 0.40f, COL_INK_SOFT, "TIME");
     snprintf(buf, sizeof(buf), "%d:%02d", secs / 60, secs % 60);
-    text_left(app, 14.0f, 92.0f, 0.4f, COL_INK, buf);
-    text_left(app, 14.0f, 108.0f, 0.36f, COL_INK_SOFT, "ROT DOWN");
+    text_left(app, 14.0f, 96.0f, 0.50f, COL_INK, buf);
+    text_left(app, 14.0f, 118.0f, 0.40f, COL_INK_SOFT, "KILLS");
     snprintf(buf, sizeof(buf), "%d", g->zombies_killed);
-    text_left(app, 14.0f, 118.0f, 0.4f, COL_INK, buf);
-    text_left(app, 14.0f, 134.0f, 0.36f, COL_INK_SOFT, "ROUNDS");
+    text_left(app, 14.0f, 130.0f, 0.50f, COL_INK, buf);
+    text_left(app, 14.0f, 148.0f, 0.40f, COL_INK_SOFT, "ROUNDS");
     for (i = 0; i < WEAPON_COUNT; i++)
         rounds += g->player.ammo[i];
     snprintf(buf, sizeof(buf), "%d", rounds);
-    text_left(app, 14.0f, 144.0f, 0.4f, COL_INK, buf);
-
-    /* v0.3: app-local NEW ZONE badge (bottom of the facts column so it is not
-     * covered by the map plate) */
-    if ((app->new_zone_mask & (1u << (unsigned)g->zone)) != 0u) {
-        fill_rect(14.0f, 158.0f, 56.0f, 13.0f, COL_BLOOD);
-        text_center(app, 42.0f, 160.5f, 0.22f, COL_BONE, "NEW ZONE");
-    }
+    text_left(app, 14.0f, 157.0f, 0.50f, COL_INK, buf);
 
     draw_area_map(app);
 
-    /* right column: map legend + objective (single short line) */
-    circle(232.0f, 84.0f, 3.0f, COL_BRASS_HI);
-    text_left(app, 240.0f, 78.0f, 0.36f, COL_INK_SOFT, "YOU");
-    circle(232.0f, 98.0f, 3.0f, COL_ROT);
-    text_left(app, 240.0f, 92.0f, 0.36f, COL_INK_SOFT, "ROT");
-    circle(232.0f, 112.0f, 3.0f, COL_HILITE);
-    text_left(app, 240.0f, 106.0f, 0.36f, COL_INK_SOFT, "LOOT");
-    tri(229.0f, 134.0f, 235.0f, 134.0f, 232.0f, 126.0f, COL_BRASS_HI);
-    text_left(app, 240.0f, 122.0f, 0.36f, COL_INK_SOFT, "GATE");
-    text_left(app, 226.0f, 138.0f, 0.36f, COL_INK_SOFT, "OBJECTIVE");
-    if (g->quest.kind == QUEST_COLLECT) {
-        snprintf(buf, sizeof(buf), "GET %s",
-                 grave_drop_name((GraveDrop)g->quest.material));
-        text_left(app, 226.0f, 150.0f, 0.38f, COL_BLOOD, buf);
-    } else {
-        text_left(app, 226.0f, 150.0f, 0.4f, COL_BLOOD, "CLEAR ROT");
-    }
-
-    /* quest progress strip */
-    paper_panel(qs.x, qs.y, qs.w, qs.h);
-    if (g->quest.target > 0)
-        frac = (float)g->quest.progress / (float)g->quest.target;
-    /* Short labels only: at scale 0.40+ "CLEAR THE ROT" would collide with the
-     * progress readout, and short words keep the glyph stems crisp. */
+    /* the one big objective + short legend */
     if (g->quest.kind == QUEST_COLLECT) {
         if (g->quest.material == DROP_COIN)
             snprintf(buf, sizeof(buf), "GET COINS");
@@ -907,34 +892,29 @@ static void draw_area_page(const App *app)
             snprintf(buf, sizeof(buf), "GET SINEW");
         else
             snprintf(buf, sizeof(buf), "GET CHARMS");
-        text_left(app, qs.x + 14.0f, qs.y + 2.0f, 0.42f, COL_INK, buf);
     } else {
-        text_left(app, qs.x + 14.0f, qs.y + 2.0f, 0.42f, COL_INK,
-                  "CLEAR ROT");
+        snprintf(buf, sizeof(buf), "CLEAR ROT");
     }
-    snprintf(buf, sizeof(buf), "%d/%d", g->quest.progress, g->quest.target);
-    text_left(app, qs.x + 108.0f, qs.y + 2.0f, 0.4f, COL_INK, buf);
-    bar(qs.x + 146.0f, qs.y + 5.0f, 44.0f, 7.0f, frac, COL_BRASS_HI,
-        COL_PAPER_LO);
-    snprintf(buf, sizeof(buf), "C%d S%d", g->material_coins,
-             g->material_sinew);
-    text_right(app, qs.x + qs.w - 6.0f, qs.y + 2.0f, 0.34f, COL_INK_SOFT, buf);
+    text_left(app, 226.0f, 82.0f, 0.46f, COL_BLOOD, buf);
+    snprintf(buf, sizeof(buf), "%d / %d", g->quest.progress,
+             g->quest.target);
+    text_left(app, 226.0f, 104.0f, 0.50f, COL_INK, buf);
+    if (g->quest.target > 0)
+        frac = (float)g->quest.progress / (float)g->quest.target;
+    bar(226.0f, 128.0f, 76.0f, 10.0f, frac, COL_BRASS_HI, COL_PAPER_LO);
 
-    /* footer hint: hard cap y <= 204 so the system font line box fits */
-    text_center(app, 160.0f, 201.0f, 0.34f, COL_BONE_DIM,
-                "TOUCH TABS OR PRESS SELECT");
-}
-/* ------------------------------------------------------------------ */
+    circle(230.0f, 148.0f, 3.4f, COL_BRASS_HI);
+    text_left(app, 238.0f, 141.0f, 0.38f, COL_INK, "YOU");
+    circle(230.0f, 164.0f, 3.4f, COL_ROT);
+    text_left(app, 238.0f, 157.0f, 0.38f, COL_INK, "ROT");
+    circle(268.0f, 148.0f, 3.4f, COL_HILITE);
+    text_left(app, 276.0f, 141.0f, 0.38f, COL_INK, "LOOT");
+    tri(264.0f, 164.0f, 272.0f, 164.0f, 268.0f, 155.0f, COL_BRASS_HI);
+    text_left(app, 276.0f, 157.0f, 0.38f, COL_INK, "GATE");
+}/* ------------------------------------------------------------------ */
 /* WORLD page: valley map with zone nodes                             */
 /* ------------------------------------------------------------------ */
 
-static void format_mins(const char *prefix, float seconds, char *buf,
-                        size_t size)
-{
-    int secs = (int)(seconds + 0.5f);
-
-    snprintf(buf, size, "%s %d:%02d", prefix, secs / 60, secs % 60);
-}
 
 /* One WORLD-map node plate.  Reads the core's ZoneNode state: locked zones are
  * dimmed, unlocked ones are travelable, cleared ones show clears + best time;
@@ -945,137 +925,70 @@ static void draw_world_node(const App *app, int zone, UiRect r)
     const ZoneNode *node = &g->world.nodes[zone];
     const char *name = grave_zone_name((ZoneId)zone);
     bool current = (g->world.current == (ZoneId)zone);
-    char buf[64];
-    char time_buf[40];
-    float line2_y;
-    float line3_y;
+    char buf[40];
 
+    if (!node->unlocked) {
+        fill_rect(r.x - 1.0f, r.y - 1.0f, r.w + 2.0f, r.h + 2.0f, COL_INK);
+        fill_rect(r.x, r.y, r.w, r.h, CLR(0x4A, 0x3E, 0x2E, 0xFF));
+        text_left(app, r.x + 10.0f, r.y + 2.0f, 0.40f,
+                  CLR(0x8A, 0x7C, 0x62, 0xFF), name);
+        text_left(app, r.x + 10.0f, r.y + 20.0f, 0.40f,
+                  CLR(0x8A, 0x7C, 0x62, 0xFF), "LOCKED");
+        return;
+    }
+
+    paper_panel(r.x, r.y, r.w, r.h);
     if (current) {
-        fill_rect(r.x - 2.0f, r.y - 2.0f, r.w + 4.0f, r.h + 4.0f, COL_INK);
-        fill_rect(r.x - 1.0f, r.y - 1.0f, r.w + 2.0f, r.h + 2.0f,
-                  COL_BRASS_HI);
-        fill_rect(r.x, r.y, r.w, r.h, COL_PAPER);
-        fill_rect(r.x, r.y, r.w, 3.0f, COL_BLOOD_HI);
-        circle(r.x + 9.0f, r.y + r.h - 9.0f, 3.5f, COL_BLOOD_HI);
-        text_shadow_center(app, r.x + r.w * 0.5f, r.y + 3.0f, 0.4f, COL_INK,
-                           name);
-        text_center(app, r.x + r.w * 0.5f, r.y + 18.0f, 0.34f, COL_BLOOD,
-                    g->world.in_zone ? "CURRENT ZONE" : "TRAILHEAD");
-        line2_y = r.y + 30.0f;
-    } else {
-        fill_rect(r.x, r.y, r.w, r.h, COL_BG2);
-        frame_rect(r.x, r.y, r.w, r.h, 1.5f, CLR(0x4A, 0x3A, 0x26, 0xFF));
-        text_center(app, r.x + r.w * 0.5f, r.y + 3.0f, 0.4f,
-                    node->unlocked ? COL_BONE : CLR(0x8A, 0x7C, 0x62, 0xFF),
-                    name);
-        if (!node->unlocked)
-            text_center(app, r.x + r.w * 0.5f, r.y + 18.0f, 0.34f,
-                        CLR(0x8A, 0x7C, 0x62, 0xFF), "LOCKED");
-        else if (node->cleared)
-            text_center(app, r.x + r.w * 0.5f, r.y + 18.0f, 0.34f, COL_BRASS,
-                        "CLEARED");
-        else
-            text_center(app, r.x + r.w * 0.5f, r.y + 18.0f, 0.34f, COL_BRASS_HI,
-                        "TRAVEL");
-        line2_y = r.y + 30.0f;
+        fill_rect(r.x, r.y, r.w, 4.0f, COL_BLOOD_HI);
+        fill_rect(r.x, r.y, 4.0f, r.h, COL_BLOOD_HI);
     }
-    line3_y = line2_y;
-
-    if (node->cleared && node->clears > 0 && line3_y + 8.0f <= r.y + r.h) {
-        if (node->best_time > 0.0f) {
-            format_mins("BEST", node->best_time, time_buf, sizeof(time_buf));
-            snprintf(buf, sizeof(buf), "x%d  %s", node->clears, time_buf);
-        } else {
-            snprintf(buf, sizeof(buf), "x%d", node->clears);
-        }
-        text_center(app, r.x + r.w * 0.5f, line3_y, 0.34f,
-                    current ? COL_INK_SOFT
-                            : (node->unlocked ? COL_BONE_DIM
-                                              : CLR(0x8A, 0x7C, 0x62, 0xFF)),
-                    buf);
-    }
-
-    /* v0.3: app-local NEW badge, cleared once the player views WORLD/AREA */
-    if (!current && (app->new_zone_mask & (1u << (unsigned)zone)) != 0u) {
-        fill_rect(r.x + r.w - 33.0f, r.y - 6.0f, 30.0f, 13.0f, COL_BLOOD);
-        text_center(app, r.x + r.w - 18.0f, r.y - 3.5f, 0.22f, COL_BONE, "NEW");
+    text_left(app, r.x + 10.0f, r.y + 3.0f, 0.42f, COL_INK, name);
+    if (current)
+        snprintf(buf, sizeof(buf), "CURRENT");
+    else if (node->cleared)
+        snprintf(buf, sizeof(buf), "CLEARED %d:%02d",
+                 (int)node->best_time / 60, (int)node->best_time % 60);
+    else
+        snprintf(buf, sizeof(buf), "TAP TO TRAVEL");
+    text_right(app, r.x + r.w - 10.0f, r.y + 21.0f, 0.38f,
+               current ? COL_BLOOD : (node->cleared ? COL_BRASS
+                                                    : COL_INK_SOFT),
+               buf);
+    if ((app->new_zone_mask & (1u << (unsigned)zone)) != 0u) {
+        fill_rect(r.x + r.w - 40.0f, r.y - 3.0f, 38.0f, 14.0f, COL_BLOOD);
+        text_center(app, r.x + r.w - 21.0f, r.y - 1.5f, 0.32f, COL_BONE,
+                    "NEW");
     }
 }
 
 static void draw_world_page(const App *app)
 {
     const GraveGame *g = &app->game;
-    char buf[64];
+    char buf[56];
+    float frac = 0.0f;
     int i;
 
-    paper_panel(6.0f, CONTENT_Y, 308.0f, 116.0f);
-    text_left(app, 14.0f, CONTENT_Y + 3.0f, 0.36f, COL_INK_SOFT,
-              "THE VALLEY");
-    text_right(app, 306.0f, CONTENT_Y + 3.0f, 0.36f, COL_INK_SOFT,
-               "ZONE MAP");
+    paper_panel(6.0f, CONTENT_Y, 308.0f, 156.0f);
+    text_left(app, 14.0f, CONTENT_Y + 4.0f, 0.46f, COL_INK, "THE VALLEY");
+    text_right(app, 306.0f, CONTENT_Y + 4.0f, 0.42f, COL_INK_SOFT,
+               g->world.in_zone ? "ON THE TRAIL" : "CAMP");
 
-    /* faint contour lines under the road/nodes so the parchment reads as a
-     * valley map without competing with the node plates. */
-    for (i = 0; i < 3; i++) {
-        float ly = 86.0f + (float)i * 6.0f;
-
-        line(20.0f, ly, 150.0f, ly + 1.0f, 1.0f,
-             CLR(0x5A, 0x48, 0x30, 0x70));
-        line(170.0f, ly + 1.0f, 300.0f, ly, 1.0f,
-             CLR(0x5A, 0x48, 0x30, 0x70));
-    }
-    line(20.0f, 174.0f, 150.0f, 173.0f, 1.0f, CLR(0x5A, 0x48, 0x30, 0x70));
-    line(170.0f, 173.0f, 300.0f, 174.0f, 1.0f, CLR(0x5A, 0x48, 0x30, 0x70));
-
-    /* dashed roads from the trailhead/current node to the other zones */
-    {
-        UiRect cur = ui_world_node_rect(g->world.current);
-        float ax = cur.x + cur.w * 0.5f;
-        float ay = cur.y + cur.h * 0.5f;
-        int z;
-
-        for (z = 0; z < ZONE_COUNT; z++) {
-            UiRect nr = ui_world_node_rect(z);
-            float bx = nr.x + nr.w * 0.5f;
-            float by = nr.y + nr.h * 0.5f;
-            int k;
-
-            if (z == (int)g->world.current)
-                continue;
-            for (k = 0; k < 10; k++) {
-                float t0 = (float)k / 10.0f;
-                float t1 = t0 + 0.05f;
-
-                line(ax + (bx - ax) * t0, ay + (by - ay) * t0,
-                     ax + (bx - ax) * t1, ay + (by - ay) * t1, 1.5f,
-                     COL_INK_SOFT);
-            }
-        }
-    }
-
-    for (i = 0; i < ZONE_COUNT; i++)
+    for (i = 0; i < UI_WORLD_NODE_COUNT; i++)
         draw_world_node(app, i, ui_world_node_rect(i));
 
-    /* quest line + run/lifetime summary */
-    paper_panel(6.0f, 180.0f, 308.0f, 18.0f);
-    if (g->quest.kind == QUEST_COLLECT) {
-        snprintf(buf, sizeof(buf), "QUEST: GATHER %s",
+    if (g->quest.kind == QUEST_COLLECT)
+        snprintf(buf, sizeof(buf), "COLLECT %s",
                  grave_drop_name((GraveDrop)g->quest.material));
-    } else {
-        snprintf(buf, sizeof(buf), "QUEST: CLEAR THE ROT");
-    }
-    text_left(app, 12.0f, 183.0f, 0.4f, COL_INK, buf);
-    snprintf(buf, sizeof(buf), "%d/%d", g->quest.progress, g->quest.target);
-    text_right(app, 306.0f, 182.0f, 0.4f, COL_INK, buf);
-
-    /* TODO(v0.3): accuracy needs a shots-fired counter in the core. */
-    snprintf(buf, sizeof(buf),
-             "COINS %d   SINEW %d   CHARMS %d   RUNS %d   ACC --",
-             g->material_coins, g->material_sinew, g->material_bone_charms,
-             g->zone_runs);
-    text_center(app, 160.0f, 202.0f, 0.34f, COL_BONE_DIM, buf);
-}
-/* ------------------------------------------------------------------ */
+    else
+        snprintf(buf, sizeof(buf), "CLEAR THE ROT");
+    if (g->quest.target > 0)
+        frac = (float)g->quest.progress / (float)g->quest.target;
+    text_left(app, 14.0f, 198.0f, 0.42f, COL_INK, buf);
+    snprintf(buf, sizeof(buf), "%d/%d", g->quest.progress,
+             g->quest.target);
+    text_right(app, 306.0f, 198.0f, 0.42f, COL_INK, buf);
+    bar(14.0f, 212.0f, 268.0f, 7.0f, frac, COL_BRASS_HI, COL_PAPER_LO);
+}/* ------------------------------------------------------------------ */
 /* PACK page: weapons, materials, character stats                     */
 /* ------------------------------------------------------------------ */
 
@@ -1086,7 +999,7 @@ static void draw_pack_weapon_card(const App *app, int index)
     const WeaponSpec *spec = grave_weapon_spec((WeaponId)index);
     bool selected = (g->player.weapon == (WeaponId)index);
     bool owned = grave_inventory_owned(g, (WeaponId)index);
-    char buf[64];
+    char buf[48];
     int ammo = owned ? g->player.ammo[index] : 0;
     int mag = (spec != NULL && spec->magazine > 0) ? spec->magazine : 1;
 
@@ -1097,15 +1010,8 @@ static void draw_pack_weapon_card(const App *app, int index)
         if (spec != NULL && spec->name != NULL)
             text_left(app, r.x + 12.0f, r.y + 2.0f, 0.42f,
                       CLR(0x3A, 0x2E, 0x1E, 0xFF), spec->name);
-        text_right(app, r.x + r.w - 8.0f, r.y + 2.0f, 0.36f,
-                   CLR(0x3A, 0x2E, 0x1E, 0xFF), "NOT OWNED");
-        if (spec != NULL) {
-            snprintf(buf, sizeof(buf), "DMG %d   RNG %.0f   RELOAD %.1fs",
-                     spec->damage, (double)spec->range,
-                     (double)spec->reload_time);
-            text_left(app, r.x + 12.0f, r.y + 16.0f, 0.30f,
-                      CLR(0x3A, 0x2E, 0x1E, 0xFF), buf);
-        }
+        text_right(app, r.x + r.w - 8.0f, r.y + 2.0f, 0.40f,
+                   CLR(0x3A, 0x2E, 0x1E, 0xFF), "LOCKED");
         return;
     }
 
@@ -1122,212 +1028,154 @@ static void draw_pack_weapon_card(const App *app, int index)
     }
 
     if (spec != NULL && spec->name != NULL)
-        text_left(app, r.x + 12.0f, r.y + 2.0f, 0.42f, COL_INK, spec->name);
-
+        text_left(app, r.x + 12.0f, r.y + 2.0f, 0.46f, COL_INK, spec->name);
     snprintf(buf, sizeof(buf), "%d / %d", ammo, mag);
-    text_right(app, r.x + r.w - 8.0f, r.y + 2.0f, 0.44f,
+    text_right(app, r.x + r.w - 8.0f, r.y + 3.0f, 0.46f,
                ammo > 0 ? COL_INK : COL_BLOOD, buf);
 
     if (spec != NULL) {
-        snprintf(buf, sizeof(buf), "DMG %d   RNG %.0f   RELOAD %.1fs",
-                 spec->damage, (double)spec->range, (double)spec->reload_time);
-        text_left(app, r.x + 12.0f, r.y + 16.0f, 0.30f, COL_INK_SOFT, buf);
-        snprintf(buf, sizeof(buf), "MAG %d   %s", spec->magazine,
-                 selected ? "EQUIPPED" : "TAP TO EQUIP");
-        text_left(app, r.x + 12.0f, r.y + 27.0f, 0.30f,
-                  selected ? COL_BLOOD : COL_INK_SOFT, buf);
+        snprintf(buf, sizeof(buf), "DMG %d   RNG %.0f", spec->damage,
+                 (double)spec->range);
+        text_left(app, r.x + 12.0f, r.y + 20.0f, 0.36f, COL_INK_SOFT, buf);
+        snprintf(buf, sizeof(buf), "RELOAD %.1fs   MAG %d",
+                 (double)spec->reload_time, spec->magazine);
+        text_left(app, r.x + 12.0f, r.y + 27.0f, 0.34f, COL_INK_SOFT, buf);
     }
 }
 
 static void draw_pack_page(const App *app)
 {
     const GraveGame *g = &app->game;
-    UiRect panel = { 182.0f, CONTENT_Y, 132.0f, 156.0f };
+    UiRect panel = { 196.0f, CONTENT_Y, 118.0f, 156.0f };
     const Player *p = &g->player;
-    char buf[64];
+    char buf[48];
+    int acc = g->total_shots > 0
+                  ? (g->total_hits * 100) / g->total_shots
+                  : 0;
     int i;
 
     for (i = 0; i < WEAPON_COUNT; i++)
         draw_pack_weapon_card(app, i);
 
-    /* right-hand character sheet */
     paper_panel(panel.x, panel.y, panel.w, panel.h);
-    text_shadow_center(app, panel.x + panel.w * 0.5f, panel.y + 4.0f, 0.38f,
-                       COL_INK, "MATERIALS");
-    divider(panel.x + 8.0f, panel.y + 18.0f, panel.w - 16.0f);
+    text_shadow_center(app, panel.x + panel.w * 0.5f, panel.y + 4.0f, 0.44f,
+                       COL_INK, "STUFF");
+    divider(panel.x + 8.0f, panel.y + 20.0f, panel.w - 16.0f);
 
-    text_left(app, panel.x + 10.0f, panel.y + 22.0f, 0.34f, COL_INK_SOFT,
-              "OLD COINS");
-    snprintf(buf, sizeof(buf), "%d", g->material_coins);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 22.0f, 0.34f, COL_INK,
+    text_left(app, panel.x + 8.0f, panel.y + 24.0f, 0.38f, COL_INK_SOFT,
+              "COINS");
+    snprintf(buf, sizeof(buf), "%d", (int)(app->display_coins + 0.5f));
+    text_right(app, panel.x + panel.w - 8.0f, panel.y + 24.0f, 0.40f, COL_INK,
                buf);
-    text_left(app, panel.x + 10.0f, panel.y + 33.0f, 0.34f, COL_INK_SOFT,
-              "ROT SINEW");
-    snprintf(buf, sizeof(buf), "%d", g->material_sinew);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 33.0f, 0.34f, COL_INK,
+    text_left(app, panel.x + 8.0f, panel.y + 38.0f, 0.38f, COL_INK_SOFT,
+              "SINEW");
+    snprintf(buf, sizeof(buf), "%d", (int)(app->display_sinew + 0.5f));
+    text_right(app, panel.x + panel.w - 8.0f, panel.y + 38.0f, 0.40f, COL_INK,
                buf);
-    text_left(app, panel.x + 10.0f, panel.y + 44.0f, 0.34f, COL_INK_SOFT,
-              "BONE CHARM");
-    snprintf(buf, sizeof(buf), "%d", g->material_bone_charms);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 44.0f, 0.34f, COL_INK,
+    text_left(app, panel.x + 8.0f, panel.y + 52.0f, 0.38f, COL_INK_SOFT,
+              "CHARMS");
+    snprintf(buf, sizeof(buf), "%d", (int)(app->display_charms + 0.5f));
+    text_right(app, panel.x + panel.w - 8.0f, panel.y + 52.0f, 0.40f, COL_INK,
                buf);
 
-    divider(panel.x + 8.0f, panel.y + 56.0f, panel.w - 16.0f);
+    divider(panel.x + 8.0f, panel.y + 66.0f, panel.w - 16.0f);
+    text_shadow_center(app, panel.x + panel.w * 0.5f, panel.y + 70.0f, 0.44f,
+                       COL_INK, "YOU");
 
-    text_shadow_center(app, panel.x + panel.w * 0.5f, panel.y + 59.0f, 0.38f,
-                       COL_INK, "CHARACTER");
-    text_left(app, panel.x + 10.0f, panel.y + 72.0f, 0.34f, COL_INK_SOFT,
-              "HEALTH");
-    snprintf(buf, sizeof(buf), "%d/%d", (int)(p->hp + 0.5f),
+    snprintf(buf, sizeof(buf), "HP %d/%d", (int)(p->hp + 0.5f),
              (int)(p->max_hp + 0.5f));
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 72.0f, 0.34f, COL_INK,
-               buf);
-    bar(panel.x + 10.0f, panel.y + 81.0f, panel.w - 20.0f, 5.0f,
+    text_left(app, panel.x + 8.0f, panel.y + 88.0f, 0.40f,
+              p->hp < p->max_hp * 0.3f ? COL_BLOOD : COL_INK, buf);
+    bar(panel.x + 8.0f, panel.y + 102.0f, panel.w - 16.0f, 6.0f,
         p->max_hp > 0.0f ? p->hp / p->max_hp : 0.0f, COL_BLOOD_HI,
         COL_PAPER_LO);
+    snprintf(buf, sizeof(buf), "ACC %d%%", acc);
+    text_left(app, panel.x + 8.0f, panel.y + 114.0f, 0.42f, COL_INK, buf);
+    snprintf(buf, sizeof(buf), "KILLS %d", g->total_kills);
+    text_left(app, panel.x + 8.0f, panel.y + 132.0f, 0.38f, COL_INK_SOFT,
+              buf);
 
-    text_left(app, panel.x + 10.0f, panel.y + 89.0f, 0.34f, COL_INK_SOFT,
-              "STAMINA");
-    {
-        float stam = p->stamina > 1.5f ? p->stamina / 100.0f : p->stamina;
-
-        bar(panel.x + 10.0f, panel.y + 98.0f, panel.w - 20.0f, 5.0f, stam,
-            COL_STAM, COL_PAPER_LO);
-    }
-
-    text_left(app, panel.x + 10.0f, panel.y + 106.0f, 0.34f, COL_INK_SOFT,
-              "RUN KILLS");
-    snprintf(buf, sizeof(buf), "%d", g->zombies_killed);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 106.0f, 0.34f, COL_INK,
-               buf);
-
-    text_left(app, panel.x + 10.0f, panel.y + 117.0f, 0.34f, COL_INK_SOFT,
-              "LIFETIME");
-    snprintf(buf, sizeof(buf), "%d", g->total_kills);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 117.0f, 0.34f, COL_INK,
-               buf);
-
-    text_left(app, panel.x + 10.0f, panel.y + 128.0f, 0.34f, COL_INK_SOFT,
-              "ZONE RUNS");
-    snprintf(buf, sizeof(buf), "%d", g->zone_runs);
-    text_right(app, panel.x + panel.w - 8.0f, panel.y + 128.0f, 0.34f, COL_INK,
-               buf);
-
-    /* v0.3: lifetime accuracy from the core shot counters */
-    {
-        int acc = g->total_shots > 0
-                      ? (g->total_hits * 100) / g->total_shots
-                      : 0;
-
-        text_left(app, panel.x + 10.0f, panel.y + 139.0f, 0.34f, COL_INK_SOFT,
-                  "ACC");
-        snprintf(buf, sizeof(buf), "%d%%", acc);
-        text_right(app, panel.x + panel.w - 8.0f, panel.y + 139.0f, 0.34f,
-                   COL_INK, buf);
-    }
+    text_center(app, 96.0f, 216.0f, 0.40f, COL_BONE_DIM,
+                "TAP A CARD TO EQUIP");
 }
-/* ------------------------------------------------------------------ */
-/* v0.3 extras: boss bar, toast, travel dialog                        */
+/* SHOP page: trailhead trader                                       */
 /* ------------------------------------------------------------------ */
 
-/* Foreman boss bar: three thick layer segments along the bottom edge.  Only
- * drawn while the boss is alive; nothing else in the HUD is affected. */
 static void draw_boss_bar(const App *app)
 {
     const GraveGame *g = &app->game;
     float frac;
     int i;
 
-    if (!g->world.in_zone || !g->boss_alive || g->boss_max_hp <= 0.0f)
+    if (g->boss_alive == 0)
         return;
-
-    frac = g->boss_hp / g->boss_max_hp;
-    if (frac < 0.0f)
-        frac = 0.0f;
-    if (frac > 1.0f)
-        frac = 1.0f;
-
-    dark_panel(6.0f, 220.0f, 308.0f, 18.0f);
-    text_left(app, 12.0f, 224.0f, 0.32f, COL_BLOOD_HI, "FOREMAN");
-
+    frac = g->boss_max_hp > 0.0f ? g->boss_hp / g->boss_max_hp : 0.0f;
+    fill_rect(6.0f, 220.0f, 308.0f, 18.0f, COL_INK);
+    fill_rect(8.0f, 222.0f, 304.0f, 14.0f, CLR(0x3A, 0x20, 0x16, 0xFF));
+    text_left(app, 12.0f, 222.0f, 0.36f, COL_BLOOD_HI, "FOREMAN");
     for (i = 0; i < 3; i++) {
-        float x = 54.0f + (float)i * 85.0f;
         float seg = frac * 3.0f - (float)(2 - i);
-        u32 fill;
+        u32 fill = (i == 0) ? COL_BLOOD_HI
+                            : (i == 1 ? CLR(0x4E, 0x6E, 0x9E, 0xFF)
+                                      : COL_BRASS_HI);
 
         if (seg < 0.0f)
             seg = 0.0f;
         if (seg > 1.0f)
             seg = 1.0f;
-        if (i == 0)
-            fill = COL_BLOOD_HI;       /* outer HP layer   */
-        else if (i == 1)
-            fill = CLR(0x62, 0x80, 0xC8, 0xFF); /* shield layer */
-        else
-            fill = COL_HILITE;         /* armor layer      */
-        bar(x, 224.0f, 82.0f, 10.0f, seg, fill, COL_BG2);
+        fill_rect(96.0f + (float)i * 68.0f, 224.0f, 64.0f, 10.0f,
+                  CLR(0x20, 0x18, 0x10, 0xFF));
+        fill_rect(96.0f + (float)i * 68.0f, 224.0f, 64.0f * seg, 10.0f, fill);
     }
 }
 
-/* Transient bottom-screen feedback ("PURCHASED: ..." / "MODELS RELOADED"). */
 static void draw_toast(const App *app)
 {
-    char buf[52];
-    float w;
+    char buf[48];
+    float bounce;
 
     if (app->toast_timer <= 0.0f || app->toast[0] == '\0')
         return;
-
     snprintf(buf, sizeof(buf), "%.44s", app->toast);
-    w = (float)strlen(buf) * 8.0f * 0.30f + 20.0f;
-    if (w > 300.0f)
-        w = 300.0f;
-    if (w < 300.0f)
-        w = 300.0f; /* full-width notification bar, never a half-overlap */
-    dark_panel(10.0f, CONTENT_Y, w, 16.0f);
-    text_center(app, 160.0f, CONTENT_Y + 4.0f, 0.34f, COL_HILITE, buf);
+    bounce = 1.0f + 0.10f * sinf(app->time * 26.0f) *
+                        (app->toast_timer > 1.6f ? 1.0f : 0.0f);
+    dark_panel(10.0f, CONTENT_Y, 300.0f, 18.0f);
+    text_center(app, 160.0f, CONTENT_Y + 4.0f, 0.36f * bounce, COL_HILITE,
+                buf);
 }
 
-/* TRAVEL confirmation dialog for WORLD nodes (unlocked, not current). */
 static void draw_travel_dialog(const App *app)
 {
     const GraveGame *g = &app->game;
-    int z = app->travel_confirm_zone;
-    const ZoneNode *node;
     UiRect yes = ui_travel_yes_rect();
     UiRect no = ui_travel_no_rect();
-    char buf[64];
+    char buf[48];
+    int zone = app->travel_confirm_zone;
 
-    if (z < 0 || z >= ZONE_COUNT || app->page != APP_PAGE_HUD)
+    if (zone < 0 || zone >= ZONE_COUNT)
         return;
-
-    node = &g->world.nodes[z];
-    g_z = 1.0f;
-    fill_rect(0.0f, 0.0f, 320.0f, 240.0f, CLR(0x08, 0x06, 0x04, 0xB4));
+    g_z = 2.0f;
+    fill_rect(0.0f, CONTENT_Y, 320.0f, 174.0f, CLR(0x08, 0x06, 0x04, 0xB0));
     paper_panel(46.0f, 72.0f, 228.0f, 92.0f);
-    text_center(app, 160.0f, 82.0f, 0.44f, COL_INK, "TRAVEL TO");
-    text_shadow_center(app, 160.0f, 100.0f, 0.46f, COL_BLOOD,
-                       grave_zone_name((ZoneId)z));
-    if (node->cleared) {
-        snprintf(buf, sizeof(buf), "CLEARED x%d  -  BEST %d:%02d", node->clears,
-                 (int)node->best_time / 60, (int)node->best_time % 60);
-    } else {
-        snprintf(buf, sizeof(buf), "NEW TERRITORY  -  THE ROT WAITS");
-    }
-    text_center(app, 160.0f, 120.0f, 0.34f, COL_INK_SOFT, buf);
+    text_center(app, 160.0f, 80.0f, 0.44f, COL_INK, "TRAVEL TO");
+    text_woodcut_center(app, 160.0f, 98.0f, 0.46f, COL_BLOOD_HI,
+                        grave_zone_name((ZoneId)zone));
+    if (g->world.nodes[zone].cleared)
+        snprintf(buf, sizeof(buf), "BEST %d:%02d",
+                 (int)g->world.nodes[zone].best_time / 60,
+                 (int)g->world.nodes[zone].best_time % 60);
+    else
+        snprintf(buf, sizeof(buf), "%s", "UNCLEARED");
+    text_center(app, 160.0f, 116.0f, 0.38f, COL_INK_SOFT, buf);
 
     paper_button(yes.x, yes.y, yes.w, yes.h, COL_BRASS_HI);
-    text_shadow_center(app, yes.x + yes.w * 0.5f, yes.y + 6.0f, 0.35f,
+    text_shadow_center(app, yes.x + yes.w * 0.5f, yes.y + 6.0f, 0.40f,
                        COL_INK, "TRAVEL");
     paper_button(no.x, no.y, no.w, no.h, COL_BLOOD);
-    text_shadow_center(app, no.x + no.w * 0.5f, no.y + 6.0f, 0.35f, COL_INK,
+    text_shadow_center(app, no.x + no.w * 0.5f, no.y + 6.0f, 0.40f, COL_INK,
                        "STAY");
     g_z = 0.5f;
 }
-/* ------------------------------------------------------------------ */
-/* SHOP page: trailhead trader                                       */
-/* ------------------------------------------------------------------ */
-
 static void shop_item_price(const ShopItemSpec *spec, int level, char *buf,
                             size_t size)
 {
@@ -1429,26 +1277,23 @@ static void draw_shop_item_card(const App *app, int item)
     shop_item_price(spec, level, price, sizeof(price));
 
     paper_panel(r.x, r.y, r.w, r.h);
-    shop_icon(r.x + 17.0f, r.y + 15.0f, spec);
+    shop_icon(r.x + 17.0f, r.y + 14.0f, spec);
 
-    text_left(app, r.x + 30.0f, r.y + 2.0f, 0.34f, COL_INK, spec->name);
+    text_left(app, r.x + 30.0f, r.y + 1.0f, 0.40f, COL_INK, spec->name);
 
-    /* Level is shown as pips (no tiny "LV 1/3" digits that lose stems);
-     * repeatable consumables get a small plus glyph instead. */
     if (max > 0) {
         int pip;
 
         for (pip = 0; pip < max && pip < 5; pip++)
-            circle(r.x + 9.0f + (float)pip * 5.0f, r.y + 27.0f, 1.8f,
+            circle(r.x + 9.0f + (float)pip * 5.0f, r.y + 28.0f, 1.8f,
                    pip < level ? COL_BRASS : COL_PAPER_LO);
     } else {
-        fill_rect(r.x + 8.0f, r.y + 26.0f, 6.0f, 1.6f, COL_BRASS);
-        fill_rect(r.x + 10.2f, r.y + 23.8f, 1.6f, 6.0f, COL_BRASS);
+        fill_rect(r.x + 8.0f, r.y + 27.0f, 6.0f, 1.6f, COL_BRASS);
+        fill_rect(r.x + 10.2f, r.y + 24.8f, 1.6f, 6.0f, COL_BRASS);
     }
 
-    /* cost line, readable scale */
-    text_left(app, r.x + 30.0f, r.y + 18.0f, 0.34f,
-              maxed ? COL_BRASS : (affordable ? COL_INK_SOFT : COL_BLOOD),
+    text_left(app, r.x + 30.0f, r.y + 17.0f, 0.42f,
+              maxed ? COL_BRASS : (affordable ? COL_INK : COL_BLOOD),
               maxed ? "-" : price);
 
     {
@@ -1472,7 +1317,7 @@ static void draw_shop_item_card(const App *app, int item)
         }
         fill_rect(bx, by, 42.0f, 13.0f, COL_INK);
         fill_rect(bx + 1.0f, by + 1.0f, 40.0f, 11.0f, face);
-        text_center(app, bx + 21.0f, by + 2.5f, 0.32f,
+        text_center(app, bx + 21.0f, by + 1.5f, 0.36f,
                     maxed ? COL_INK_SOFT : COL_INK, label);
     }
 }
@@ -1485,44 +1330,35 @@ static void draw_shop_page(const App *app)
 
     if (g->world.in_zone) {
         paper_panel(6.0f, CONTENT_Y, 308.0f, 174.0f);
-        text_left(app, 14.0f, CONTENT_Y + 4.0f, 0.34f, COL_INK_SOFT,
+        text_left(app, 14.0f, CONTENT_Y + 4.0f, 0.44f, COL_INK_SOFT,
                   "THE TRADER");
-        text_right(app, 306.0f, CONTENT_Y + 4.0f, 0.34f, COL_INK_SOFT, "SHOP");
+        text_right(app, 306.0f, CONTENT_Y + 4.0f, 0.42f, COL_INK_SOFT, "SHOP");
 
         /* trader skull totem */
-        circle(160.0f, 110.0f, 18.0f, COL_BONE);
-        circle(153.0f, 104.0f, 3.5f, COL_INK);
-        circle(167.0f, 104.0f, 3.5f, COL_INK);
-        fill_rect(150.0f, 117.0f, 20.0f, 3.0f, COL_INK);
-        fill_rect(140.0f, 88.0f, 40.0f, 5.0f, COL_BRASS);
-        fill_rect(148.0f, 82.0f, 24.0f, 6.0f, COL_BRASS_HI);
+        circle(160.0f, 112.0f, 18.0f, COL_BONE);
+        circle(153.0f, 106.0f, 3.5f, COL_INK);
+        circle(167.0f, 106.0f, 3.5f, COL_INK);
+        fill_rect(150.0f, 119.0f, 20.0f, 3.0f, COL_INK);
+        fill_rect(140.0f, 90.0f, 40.0f, 5.0f, COL_BRASS);
+        fill_rect(148.0f, 84.0f, 24.0f, 6.0f, COL_BRASS_HI);
 
-        text_center(app, 160.0f, 140.0f, 0.5f, COL_BLOOD, "NO TRADER HERE");
-        text_center(app, 160.0f, 156.0f, 0.34f, COL_INK_SOFT,
-                    "THE TRADER WAITS AT THE TRAILHEAD");
-        paper_panel(84.0f, 168.0f, 152.0f, 20.0f);
-        text_center(app, 160.0f, 172.0f, 0.32f, COL_INK,
-                    "RETURN TO THE TRAIL (WORLD)");
-        text_center(app, 160.0f, 200.0f, 0.30f, COL_INK_SOFT,
-                    "PURCHASES ARE ONLY MADE OUTSIDE A ZONE");
+        text_center(app, 160.0f, 144.0f, 0.46f, COL_BLOOD, "NO TRADER HERE");
+        paper_panel(70.0f, 168.0f, 180.0f, 30.0f);
+        text_center(app, 160.0f, 176.0f, 0.42f, COL_INK,
+                    "RETURN TO THE TRAIL");
         return;
     }
 
-    /* wallet header */
     dark_panel(6.0f, CONTENT_Y, 308.0f, 18.0f);
-    text_left(app, 12.0f, CONTENT_Y + 3.0f, 0.32f, COL_BONE, "THE TRADER");
+    text_left(app, 12.0f, CONTENT_Y + 3.0f, 0.40f, COL_BONE, "THE TRADER");
     snprintf(buf, sizeof(buf), "COINS %d  SINEW %d  CHARMS %d",
-             g->material_coins, g->material_sinew, g->material_bone_charms);
-    text_right(app, 306.0f, CONTENT_Y + 3.0f, 0.32f, COL_BRASS_HI, buf);
+             (int)(app->display_coins + 0.5f), (int)(app->display_sinew + 0.5f),
+             (int)(app->display_charms + 0.5f));
+    text_right(app, 306.0f, CONTENT_Y + 3.0f, 0.36f, COL_BRASS_HI, buf);
 
     for (i = 0; i < SHOP_ITEM_COUNT; i++)
         draw_shop_item_card(app, i);
-}
-/* ------------------------------------------------------------------ */
-/* HUD page (strip + tabs + one info page)                            */
-/* ------------------------------------------------------------------ */
-
-static void draw_tab_page(const App *app, AppTab tab)
+}static void draw_tab_page(const App *app, AppTab tab)
 {
     switch (tab) {
     case APP_TAB_WORLD:
@@ -1555,6 +1391,8 @@ static void draw_hud_base(const App *app)
             p = 0.0f;
         if (p > 1.0f)
             p = 1.0f;
+        /* v0.5: springy overshoot so the page slide has a little bounce */
+        p = p + 0.07f * sinf(p * 3.14159265f);
         if (app->tab_prev == APP_TAB_COUNT - 1 && app->tab == APP_TAB_AREA)
             dir = 1.0f;
         else if (app->tab_prev == APP_TAB_AREA && app->tab == APP_TAB_COUNT - 1)
@@ -1603,7 +1441,7 @@ static void draw_title(const App *app)
     divider(50.0f, 70.0f, 220.0f);
     text_center(app, 160.0f, 6.0f, 0.38f, COL_BONE_DIM,
                 "A 3DS ZOMBIE SHOOTER");
-    text_right(app, 306.0f, 6.0f, 0.32f, COL_BONE_DIM, GRAVEPOWDER_VERSION);
+    text_right(app, 306.0f, 6.0f, 0.34f, COL_BONE_DIM, GRAVEPOWDER_VERSION);
 
     /* red zone ribbon */
     fill_rect(96.0f, 84.0f, 128.0f, 20.0f, COL_BLOOD);
@@ -1611,66 +1449,40 @@ static void draw_title(const App *app)
     fill_rect(96.0f, 102.0f, 128.0f, 2.0f, COL_INK);
     tri(96.0f, 84.0f, 88.0f, 94.0f, 96.0f, 104.0f, COL_BLOOD);
     tri(224.0f, 84.0f, 232.0f, 94.0f, 224.0f, 104.0f, COL_BLOOD);
-    text_shadow_center(app, 160.0f, 86.0f, 0.48f, COL_BONE, "ASHEN MILL");
+    text_shadow_center(app, 160.0f, 85.0f, 0.48f, COL_BONE,
+                       grave_zone_name(ZONE_ASHEN_MILL));
 
     if (app->has_save) {
         UiRect cont = ui_title_continue_rect();
         UiRect ng = ui_title_newgame_rect();
-        char savebuf[80];
-        int cleared = 0;
-        int acc = app->game.total_shots > 0
-                      ? (app->game.total_hits * 100) / app->game.total_shots
-                      : 0;
-        int secs = (int)app->game.total_time;
-
-        for (i = 0; i < ZONE_COUNT; i++)
-            if (app->game.world.nodes[i].cleared)
-                cleared++;
-        snprintf(savebuf, sizeof(savebuf), "SAVE: %d/%d ZONES  -  %d:%02d  -  ACC %d%%",
-                 cleared, ZONE_COUNT, secs / 60, secs % 60, acc);
-        text_center(app, 160.0f, 104.0f, 0.34f, COL_BONE_DIM, savebuf);
-
         char contbuf[64];
 
         paper_button(cont.x, cont.y, cont.w, cont.h,
                      pulse > 0.9f ? COL_HILITE : COL_BRASS_HI);
         snprintf(contbuf, sizeof(contbuf), "CONTINUE  -  %s",
                  grave_zone_name(app_title_target_zone(app)));
-        text_shadow_center(app, 160.0f, cont.y + 5.0f, 0.4f, COL_INK, contbuf);
+        text_shadow_center(app, 160.0f, cont.y + 9.0f, 0.46f, COL_INK,
+                           contbuf);
 
         paper_button(ng.x, ng.y, ng.w, ng.h, COL_BRASS);
-        text_shadow_center(app, 160.0f, ng.y + 3.5f, 0.34f, COL_INK,
+        text_shadow_center(app, 160.0f, ng.y + 6.0f, 0.42f, COL_INK,
                            "NEW GAME");
 
-        /* v0.4 control hints: two compact lines above the footer band */
-        dark_panel(36.0f, 172.0f, 248.0f, 34.0f);
-        text_center(app, 160.0f, 176.0f, 0.34f, COL_BONE_DIM,
-                    "TOUCH/L AIM    R FIRE    A RELOAD    B SPRINT");
-        text_center(app, 160.0f, 190.0f, 0.34f, COL_BONE_DIM,
-                    "X SWAP    Y CAM    SELECT TABS    START PAUSE");
+        text_center(app, 160.0f, 190.0f, 0.40f, COL_BONE_DIM,
+                    "L AIM  R FIRE  A RELOAD  B SPRINT  START PAUSE");
     } else {
-        /* control hints on a dark board */
-        dark_panel(36.0f, 108.0f, 248.0f, 58.0f);
-        text_center(app, 160.0f, 112.0f, 0.34f, COL_BONE_DIM,
-                    "PAD MOVE    TOUCH/L AIM");
-        text_center(app, 160.0f, 125.0f, 0.34f, COL_BONE_DIM,
-                    "R FIRE    A RELOAD    B SPRINT");
-        text_center(app, 160.0f, 138.0f, 0.34f, COL_BONE_DIM,
-                    "X SWAP GUN    Y CAMERA");
-        text_center(app, 160.0f, 151.0f, 0.34f, COL_BONE_DIM,
-                    "SELECT TABS    START PAUSE");
-
+        text_center(app, 160.0f, 120.0f, 0.40f, COL_BONE_DIM,
+                    "L AIM  R FIRE  A RELOAD  B SPRINT  START PAUSE");
         {
             UiRect r = ui_title_start_rect();
             u32 fill = pulse > 0.9f ? COL_HILITE : COL_BRASS_HI;
 
             paper_button(r.x, r.y, r.w, r.h, fill);
-            text_shadow_center(app, 160.0f, r.y + 5.0f, 0.55f, COL_INK,
+            text_shadow_center(app, 160.0f, r.y + 9.0f, 0.52f, COL_INK,
                                "PRESS A OR TAP START");
         }
     }
 }
-
 /* ------------------------------------------------------------------ */
 /* v0.3: WARDROBE, SAVE sub-page, NEW GAME confirmation               */
 /* ------------------------------------------------------------------ */
@@ -1845,29 +1657,29 @@ static void draw_pause(const App *app)
                 "THE DEAD ARE PATIENT");
 
     paper_button(rr.x, rr.y, rr.w, rr.h, COL_BRASS_HI);
-    text_shadow_center(app, 160.0f, rr.y + 5.0f, 0.42f, COL_INK, "RESUME");
+    text_shadow_center(app, 160.0f, rr.y + 4.0f, 0.46f, COL_INK, "RESUME");
 
     paper_button(ra.x, ra.y, ra.w, ra.h, COL_BRASS);
-    text_shadow_center(app, 160.0f, ra.y + 5.0f, 0.38f, COL_INK,
+    text_shadow_center(app, 160.0f, ra.y + 4.0f, 0.42f, COL_INK,
                        "RESTART ZONE");
 
     paper_button(se.x, se.y, se.w, se.h, COL_BRASS);
-    text_shadow_center(app, 160.0f, se.y + 5.0f, 0.38f, COL_INK, "SETTINGS");
+    text_shadow_center(app, 160.0f, se.y + 4.0f, 0.42f, COL_INK, "SETTINGS");
 
     paper_button(wr.x, wr.y, wr.w, wr.h, COL_BRASS);
-    text_shadow_center(app, 160.0f, wr.y + 5.0f, 0.38f, COL_INK, "WARDROBE");
+    text_shadow_center(app, 160.0f, wr.y + 4.0f, 0.42f, COL_INK, "WARDROBE");
 
     paper_button(qu.x, qu.y, qu.w, qu.h, COL_BLOOD);
-    text_shadow_center(app, 160.0f, qu.y + 5.0f, 0.38f, COL_INK,
+    text_shadow_center(app, 160.0f, qu.y + 4.0f, 0.42f, COL_INK,
                        "QUIT TO TITLE");
 
-    text_center(app, 160.0f, 202.0f, 0.34f, COL_INK_SOFT,
-                "TOUCH/L AIM  R FIRE  A RELOAD  B SPRINT");
+    text_center(app, 160.0f, 202.0f, 0.40f, COL_INK_SOFT,
+                "L AIM   R FIRE   A RELOAD   B SPRINT");
 }
 
 static void draw_settings(const App *app)
 {
-    static const char *const kSensName[APP_SENS_COUNT] = { "LOW", "MEDIUM",
+    static const char *const kSensName[APP_SENS_COUNT] = { "LOW", "MED",
                                                            "HIGH" };
     static const char *const kGyroModeName[GRAVE_GYRO_MODE_COUNT] = {
         "ON", "OFF", "INVERT"
@@ -1875,12 +1687,22 @@ static void draw_settings(const App *app)
     static const char *const kGyroSensName[GRAVE_GYRO_SENS_COUNT] = {
         "MED", "LOW", "HIGH"
     };
-    UiRect panel = { 30.0f, 18.0f, 260.0f, 204.0f };
+    static const char *const kAimName[GRAVE_AIM_ASSIST_COUNT] = {
+        "OFF", "NORMAL", "STRONG"
+    };
+    static const char *const kLabels[8] = {
+        "CAMERA", "TOUCH SENS", "GYRO", "GYRO SPEED",
+        "AIM ASSIST", "INVERT Y", "MUTE", "SAVE"
+    };
+    UiRect panel = { 18.0f, 18.0f, 284.0f, 204.0f };
     UiRect rows[8];
     UiRect back = ui_settings_back_rect();
+    const char *values[8];
+    char valuebuf[8][16];
     int sens = app->settings.touch_sens;
     int gyro_mode = app->settings.gyro_mode;
     int gyro_sens = app->settings.gyro_sens;
+    int aim = app->settings.aim_assist;
     int i;
 
     if (sens < 0 || sens >= APP_SENS_COUNT)
@@ -1889,15 +1711,32 @@ static void draw_settings(const App *app)
         gyro_mode = GRAVE_GYRO_ON;
     if (gyro_sens < 0 || gyro_sens >= GRAVE_GYRO_SENS_COUNT)
         gyro_sens = GRAVE_GYRO_SENS_MED;
+    if (aim < 0 || aim >= GRAVE_AIM_ASSIST_COUNT)
+        aim = GRAVE_AIM_ASSIST_NORMAL;
 
     rows[0] = ui_settings_camera_rect();
     rows[1] = ui_settings_sens_rect();
     rows[2] = ui_settings_gyro_rect();
     rows[3] = ui_settings_gyro_sens_rect();
-    rows[4] = ui_settings_invert_rect();
-    rows[5] = ui_settings_mute_rect();
-    rows[6] = ui_settings_save_rect();
-    rows[7] = back;
+    rows[4] = ui_settings_aim_rect();
+    rows[5] = ui_settings_invert_rect();
+    rows[6] = ui_settings_mute_rect();
+    rows[7] = ui_settings_save_rect();
+
+    snprintf(valuebuf[0], sizeof(valuebuf[0]), "%s",
+             app->game.player.camera_first_person ? "1ST PERSON"
+                                                  : "3RD PERSON");
+    snprintf(valuebuf[1], sizeof(valuebuf[1]), "%s", kSensName[sens]);
+    snprintf(valuebuf[2], sizeof(valuebuf[2]), "%s", kGyroModeName[gyro_mode]);
+    snprintf(valuebuf[3], sizeof(valuebuf[3]), "%s", kGyroSensName[gyro_sens]);
+    snprintf(valuebuf[4], sizeof(valuebuf[4]), "%s", kAimName[aim]);
+    snprintf(valuebuf[5], sizeof(valuebuf[5]), "%s",
+             app->settings.invert_y ? "ON" : "OFF");
+    snprintf(valuebuf[6], sizeof(valuebuf[6]), "%s",
+             app->settings.muted ? "ON" : "OFF");
+    snprintf(valuebuf[7], sizeof(valuebuf[7]), "%s", ">");
+    for (i = 0; i < 8; i++)
+        values[i] = valuebuf[i];
 
     draw_hud_base(app);
     g_z = 1.0f;
@@ -1906,52 +1745,17 @@ static void draw_settings(const App *app)
     paper_panel(panel.x, panel.y, panel.w, panel.h);
     text_woodcut_center(app, 160.0f, 21.0f, 0.56f, COL_BRASS_HI, "SETTINGS");
 
-    for (i = 0; i < 7; i++) {
+    for (i = 0; i < 8; i++) {
         UiRect r = rows[i];
-        const char *label = "";
-        const char *value = "";
-
-        switch (i) {
-        case 0:
-            label = "CAMERA";
-            value = app->game.player.camera_first_person ? "FIRST PERSON"
-                                                         : "THIRD PERSON";
-            break;
-        case 1:
-            label = "TOUCH SENS";
-            value = kSensName[sens];
-            break;
-        case 2:
-            label = "GYRO";
-            value = kGyroModeName[gyro_mode];
-            break;
-        case 3:
-            label = "GYRO SPEED";
-            value = kGyroSensName[gyro_sens];
-            break;
-        case 4:
-            label = "INVERT Y";
-            value = app->settings.invert_y ? "ON" : "OFF";
-            break;
-        case 5:
-            label = "MUTE AUDIO";
-            value = app->settings.muted ? "ON" : "OFF";
-            break;
-        case 6:
-        default:
-            label = "SAVE & PROGRESS";
-            value = ">";
-            break;
-        }
 
         paper_button(r.x, r.y, r.w, r.h, COL_BRASS);
-        text_left(app, r.x + 10.0f, r.y + 3.0f, 0.34f, COL_INK, label);
-        text_right(app, r.x + r.w - 10.0f, r.y + 3.0f, 0.34f, COL_BRASS,
-                   value);
+        text_left(app, r.x + 8.0f, r.y + 2.0f, 0.40f, COL_INK, kLabels[i]);
+        text_right(app, r.x + r.w - 8.0f, r.y + 16.0f, 0.40f, COL_BRASS,
+                   values[i]);
     }
 
     paper_button(back.x, back.y, back.w, back.h, COL_BRASS_HI);
-    text_shadow_center(app, 160.0f, back.y + 3.0f, 0.34f, COL_INK, "BACK");
+    text_shadow_center(app, 160.0f, back.y + 6.0f, 0.42f, COL_INK, "BACK");
 }
 
 /* ------------------------------------------------------------------ *//* results pages                                                      */
@@ -2073,6 +1877,121 @@ static void draw_game_over(const App *app)
 /* public entry points                                                */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* v0.5 mascot + juice overlays                                       */
+/* ------------------------------------------------------------------ */
+
+static void sparkle(float x, float y, float r, u32 clr)
+{
+    fill_rect(x - r, y - 0.8f, r * 2.0f, 1.6f, clr);
+    fill_rect(x - 0.8f, y - r, 1.6f, r * 2.0f, clr);
+}
+
+/* Procedural "grave pup" mascot: bobs, blinks, cheers, worries, goes pale. */
+static void draw_mascot(const App *app, float cx, float cy)
+{
+    float t = app->time;
+    float bob = 0.0f;
+    float sx = 0.0f;
+    float scale = 1.0f;
+    u32 body = COL_BONE;
+    int i;
+
+    switch (app->mascot_mood) {
+    case APP_MASCOT_HAPPY:
+        bob = -fabsf(sinf(t * 9.0f)) * 3.2f;
+        scale = 1.0f + 0.07f * sinf(t * 18.0f);
+        break;
+    case APP_MASCOT_WORRIED:
+        sx = sinf(t * 40.0f) * 1.1f;
+        break;
+    case APP_MASCOT_PALE:
+        body = COL_PAPER_LO;
+        break;
+    default:
+        bob = sinf(t * 3.2f) * 1.2f;
+        break;
+    }
+
+    cx += sx;
+    cy += bob;
+
+    circle(cx, cy + 10.0f * scale, 5.6f * scale, COL_STAIN);
+
+    /* ghost-pup body: round head + two little nubs + ears */
+    circle(cx, cy, 8.4f * scale, body);
+    circle(cx - 6.2f * scale, cy + 4.6f * scale, 3.8f * scale, body);
+    circle(cx + 6.2f * scale, cy + 4.6f * scale, 3.8f * scale, body);
+    tri(cx - 7.0f * scale, cy - 4.0f * scale, cx - 2.6f * scale,
+        cy - 13.0f * scale, cx - 0.8f * scale, cy - 3.0f * scale, body);
+    tri(cx + 7.0f * scale, cy - 4.0f * scale, cx + 2.6f * scale,
+        cy - 13.0f * scale, cx + 0.8f * scale, cy - 3.0f * scale, body);
+
+    /* eyes: blink once every ~3 s */
+    if (app->mascot_mood == APP_MASCOT_PALE) {
+        circle(cx - 3.6f * scale, cy - 1.2f * scale, 2.0f * scale, COL_INK);
+        circle(cx + 3.6f * scale, cy - 1.2f * scale, 2.0f * scale, COL_INK);
+    } else if (fmodf(t, 3.1f) < 0.12f) {
+        fill_rect(cx - 5.6f * scale, cy - 1.0f * scale, 3.4f * scale,
+                  1.2f, COL_INK);
+        fill_rect(cx + 2.2f * scale, cy - 1.0f * scale, 3.4f * scale,
+                  1.2f, COL_INK);
+    } else {
+        circle(cx - 3.6f * scale, cy - 1.4f * scale, 1.6f * scale, COL_INK);
+        circle(cx + 3.6f * scale, cy - 1.4f * scale, 1.6f * scale, COL_INK);
+    }
+
+    circle(cx - 5.8f * scale, cy + 2.4f * scale, 1.1f, COL_BLOOD_HI);
+    circle(cx + 5.8f * scale, cy + 2.4f * scale, 1.1f, COL_BLOOD_HI);
+    tri(cx - 1.4f, cy + 3.0f, cx + 1.4f, cy + 3.0f, cx, cy + 5.4f, COL_BONE);
+
+    if (app->mascot_mood == APP_MASCOT_HAPPY) {
+        for (i = 0; i < 3; i++) {
+            float a = t * 4.0f + (float)i * 2.1f;
+            sparkle(cx + cosf(a) * 15.0f, cy - 4.0f + sinf(a) * 7.0f,
+                    1.6f + 0.6f * sinf(t * 12.0f + (float)i), COL_HILITE);
+        }
+    } else if (app->mascot_mood == APP_MASCOT_WORRIED) {
+        circle(cx + 9.2f * scale, cy - 4.0f * scale, 1.6f, COL_BONE_DIM);
+        line(cx - 9.5f * scale, cy + 1.0f, cx - 11.5f * scale, cy - 1.0f,
+             1.0f, COL_BONE_DIM);
+    }
+}
+
+static void draw_press_fx(const App *app)
+{
+    float p;
+    float r;
+    int i;
+
+    if (app->press_timer <= 0.0f)
+        return;
+    p = 1.0f - app->press_timer / 0.20f;
+    r = 5.0f + 15.0f * p;
+    for (i = 0; i < 9; i++) {
+        float a = (float)i * 0.6981317f + p * 1.6f;
+
+        circle(app->press_x + cosf(a) * r, app->press_y + sinf(a) * r,
+               1.7f * (1.0f - p) + 0.6f, COL_HILITE);
+    }
+}
+
+static void draw_banner(const App *app)
+{
+    float s;
+    float y = CONTENT_Y + 34.0f;
+
+    if (app->banner_timer <= 0.0f || app->banner[0] == '\0')
+        return;
+    s = 0.62f + 0.38f * sinf((2.0f - app->banner_timer) * 1.2f);
+    if (s < 0.62f)
+        s = 0.62f;
+    if (s > 1.0f)
+        s = 1.0f;
+    dark_panel(52.0f, y, 216.0f, 30.0f);
+    text_center(app, 160.0f, y + 6.0f, 0.46f * s, COL_HILITE, app->banner);
+}
+
 void ui_draw(const App *app)
 {
     if (app == NULL || app->text_buf == NULL)
@@ -2113,8 +2032,14 @@ void ui_draw(const App *app)
         if (app->travel_confirm_zone >= 0)
             draw_travel_dialog(app);
         draw_toast(app);
+        draw_banner(app);
+        draw_mascot(app, 302.0f, 228.0f);
         break;
     }
+    if (app->page == APP_PAGE_TITLE || app->page == APP_PAGE_ZONE_CLEAR ||
+        app->page == APP_PAGE_GAME_OVER)
+        draw_mascot(app, 296.0f, 228.0f);
+    draw_press_fx(app);
 
     g_z = 0.5f;
     g_dx = 0.0f;
@@ -2239,6 +2164,8 @@ bool ui_hit_test(const App *app, int px, int py, int *action, int *arg)
             local_action = UI_ACTION_TOGGLE_GYRO;
         } else if (rect_hit(ui_settings_gyro_sens_rect(), px, py)) {
             local_action = UI_ACTION_CYCLE_GYRO_SENS;
+        } else if (rect_hit(ui_settings_aim_rect(), px, py)) {
+            local_action = UI_ACTION_CYCLE_AIM_ASSIST;
         } else if (rect_hit(ui_settings_invert_rect(), px, py)) {
             local_action = UI_ACTION_TOGGLE_INVERT;
         } else if (rect_hit(ui_settings_mute_rect(), px, py)) {

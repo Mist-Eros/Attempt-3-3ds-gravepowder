@@ -124,6 +124,53 @@ static void app_set_toast(App *a, const char *msg)
     a->toast_timer = 2.4f;
 }
 
+#define GYRO_CALIB_FRAMES 48
+
+/* v0.5 gyro pipeline: measured rest bias + low-pass filter + gentle presets.
+ * All of this is 3DS-only; the host harness compiles the stubs to no-ops. */
+static void app_gyro_begin_calibration(App *a)
+{
+    a->gyro_bias = 0.0f;
+    a->gyro_bias_acc = 0.0f;
+    a->gyro_filtered = 0.0f;
+    a->gyro_calibrated = false;
+    a->gyro_calib_left = GYRO_CALIB_FRAMES;
+}
+
+static void app_gyro_try_enable(App *a)
+{
+    a->gyro_attempted = true;
+    a->gyro_ok = false;
+    a->gyro_coef = 0.0f;
+#ifdef __3DS__
+    {
+        float coef = 0.0f;
+
+        if (R_SUCCEEDED(HIDUSER_EnableGyroscope()) &&
+            R_SUCCEEDED(HIDUSER_GetGyroscopeRawToDpsCoefficient(&coef)) &&
+            coef > 0.0f) {
+            a->gyro_ok = true;
+            a->gyro_coef = coef;
+            app_gyro_begin_calibration(a);
+        }
+    }
+#endif
+}
+
+static float app_approach(float cur, float target, float step)
+{
+    if (cur < target) {
+        cur += step;
+        if (cur > target)
+            cur = target;
+    } else if (cur > target) {
+        cur -= step;
+        if (cur < target)
+            cur = target;
+    }
+    return cur;
+}
+
 static uint32_t unlocked_mask(const GraveGame *g)
 {
     uint32_t m = 0u;
@@ -154,7 +201,14 @@ static void app_delete_save(void)
     a->settings.reserved = 0;
     a->settings.gyro_mode = GRAVE_GYRO_ON;
     a->settings.gyro_sens = GRAVE_GYRO_SENS_MED;
+    a->settings.aim_assist = GRAVE_AIM_ASSIST_NORMAL;
     grave_game_init(&a->game, a->seed++);
+    a->game.aim_assist = a->settings.aim_assist;
+    a->display_coins = 0.0f;
+    a->display_sinew = 0.0f;
+    a->display_charms = 0.0f;
+    a->mascot_mood = APP_MASCOT_IDLE;
+    a->mascot_timer = 0.0f;
     grave_input_reset(&a->input);
     a->known_unlock_mask = unlocked_mask(&a->game);
     a->new_zone_mask = 0u;
@@ -232,6 +286,11 @@ static bool enter_zone(App *a, ZoneId zone)
     a->zone_start_coins = a->game.material_coins;
     a->zone_start_sinew = a->game.material_sinew;
     a->zone_start_charms = a->game.material_bone_charms;
+    /* v0.5 presentation: wave banner pop-in + mascot perks up. */
+    snprintf(a->banner, sizeof(a->banner), "%s", "THE ROT STIRS");
+    a->banner_timer = 2.0f;
+    a->mascot_mood = APP_MASCOT_HAPPY;
+    a->mascot_timer = 1.0f;
     return true;
 }
 
@@ -246,6 +305,11 @@ static void back_to_title(App *a)
     a->tab = APP_TAB_AREA;
     a->tab_prev = APP_TAB_AREA;
     a->tab_anim = 0.0f;
+    if (a->gyro_ok)
+        app_gyro_begin_calibration(a);   /* title = console at rest */
+    a->mascot_mood = APP_MASCOT_IDLE;
+    a->mascot_timer = 0.0f;
+    a->banner_timer = 0.0f;
     app_save();
 }
 
@@ -280,6 +344,9 @@ static void capture_results(App *a, AppPage page)
         a->result_gain_charms = 0;
     a->page = page;
     a->paused = false;
+    a->mascot_mood = (page == APP_PAGE_ZONE_CLEAR) ? APP_MASCOT_HAPPY
+                                                   : APP_MASCOT_WORRIED;
+    a->mascot_timer = 3.5f;
     app_save();
 }
 
@@ -297,6 +364,8 @@ static void apply_action(App *a, int action, int arg)
             } else {
                 a->paused = true;
                 a->page = APP_PAGE_PAUSE;
+                if (a->gyro_ok)
+                    app_gyro_begin_calibration(a);
             }
         }
         break;
@@ -465,6 +534,17 @@ static void apply_action(App *a, int action, int arg)
             a->settings.gyro_mode = GRAVE_GYRO_ON;
         app_save();
         break;
+    case UI_ACTION_CYCLE_AIM_ASSIST:
+        /* cycle OFF -> NORMAL -> STRONG, mirrored into the core field */
+        if (a->settings.aim_assist == GRAVE_AIM_ASSIST_OFF)
+            a->settings.aim_assist = GRAVE_AIM_ASSIST_NORMAL;
+        else if (a->settings.aim_assist == GRAVE_AIM_ASSIST_NORMAL)
+            a->settings.aim_assist = GRAVE_AIM_ASSIST_STRONG;
+        else
+            a->settings.aim_assist = GRAVE_AIM_ASSIST_OFF;
+        a->game.aim_assist = a->settings.aim_assist;
+        app_save();
+        break;
     case UI_ACTION_CYCLE_GYRO_SENS:
         /* cycle LOW -> MED -> HIGH */
         if (a->settings.gyro_sens == GRAVE_GYRO_SENS_LOW)
@@ -534,6 +614,7 @@ void app_init(void)
     a->settings.reserved = 0;
     a->settings.gyro_mode = GRAVE_GYRO_ON;
     a->settings.gyro_sens = GRAVE_GYRO_SENS_MED;
+    a->settings.aim_assist = GRAVE_AIM_ASSIST_NORMAL;
     a->gyro_ok = false;
     a->gyro_coef = 0.0f;
     a->music = GRAVE_MUSIC_NONE;
@@ -566,30 +647,36 @@ void app_init(void)
     audio_set_muted(a->settings.muted != 0);
     audio_set_weapon(a->last_weapon);
 
-    /* sanitise settings loaded from older images, then bring the motion
-     * sensor up; Azahar/Citra may refuse it, which simply disables gyro. */
+    /* sanitise settings loaded from older images */
     if (a->settings.gyro_mode >= GRAVE_GYRO_MODE_COUNT)
         a->settings.gyro_mode = GRAVE_GYRO_ON;
     if (a->settings.gyro_sens >= GRAVE_GYRO_SENS_COUNT)
         a->settings.gyro_sens = GRAVE_GYRO_SENS_MED;
+    if (a->settings.aim_assist >= GRAVE_AIM_ASSIST_COUNT)
+        a->settings.aim_assist = GRAVE_AIM_ASSIST_NORMAL;
     if (a->settings.touch_sens >= APP_SENS_COUNT)
         a->settings.touch_sens = (uint8_t)APP_SENS_MED;
 
-#ifdef __3DS__
-    {
-        float coef = 0.0f;
+    /* the core mirrors the settings value for the assist cone */
+    a->game.aim_assist = a->settings.aim_assist;
 
-        if (R_SUCCEEDED(HIDUSER_EnableGyroscope()) &&
-            R_SUCCEEDED(HIDUSER_GetGyroscopeRawToDpsCoefficient(&coef)) &&
-            coef > 0.0f) {
-            a->gyro_ok = true;
-            a->gyro_coef = coef;
-        } else {
-            a->gyro_ok = false;
-            a->gyro_coef = 0.0f;
-        }
-    }
-#endif
+    /* v0.5: motion is enabled lazily on the first poll frame (after
+     * hidScanInput) so calibration sees a steady console; juice starts idle. */
+    a->gyro_attempted = false;
+    a->gyro_ok = false;
+    a->gyro_calibrated = false;
+    a->gyro_coef = 0.0f;
+    a->gyro_bias = 0.0f;
+    a->gyro_bias_acc = 0.0f;
+    a->gyro_calib_left = 0;
+    a->gyro_filtered = 0.0f;
+    a->mascot_mood = APP_MASCOT_IDLE;
+    a->mascot_timer = 0.0f;
+    a->press_timer = 0.0f;
+    a->banner_timer = 0.0f;
+    a->display_coins = (float)a->game.material_coins;
+    a->display_sinew = (float)a->game.material_sinew;
+    a->display_charms = (float)a->game.material_bone_charms;
 }
 
 void app_shutdown(void)
@@ -643,31 +730,47 @@ void app_poll_input(void)
      * positive yaw direction is "turn right on screen".  Pitch stays 0. */
     a->input.gyro_yaw = 0.0f;
     a->input.gyro_pitch = 0.0f;
+    if (!a->gyro_attempted)
+        app_gyro_try_enable(a);
 #ifdef __3DS__
-    if (a->gyro_ok && a->settings.gyro_mode != GRAVE_GYRO_OFF) {
+    if (a->gyro_ok) {
         angularRate rate;
-        float dps;
-        float mult;
-        const float limit = 360.0f;
 
         hidGyroRead(&rate);
-        dps = (float)rate.z * a->gyro_coef;   /* degrees/second          */
-        if (fabsf(dps) < 1.2f)
-            dps = 0.0f;                        /* deadzone                 */
-        if (a->settings.gyro_sens == GRAVE_GYRO_SENS_LOW)
-            mult = 0.55f;
-        else if (a->settings.gyro_sens == GRAVE_GYRO_SENS_HIGH)
-            mult = 1.7f;
-        else
-            mult = 1.0f;
-        dps *= mult;
-        if (a->settings.gyro_mode == GRAVE_GYRO_INVERT)
-            dps = -dps;
-        if (dps > limit)
-            dps = limit;
-        else if (dps < -limit)
-            dps = -limit;
-        a->input.gyro_yaw = dps * (3.14159265f / 180.0f); /* rad/s       */
+        if (a->gyro_calib_left > 0) {
+            /* average the first ~0.8 s at rest to measure the yaw bias */
+            a->gyro_bias_acc += (float)rate.z;
+            a->gyro_calib_left--;
+            if (a->gyro_calib_left == 0) {
+                a->gyro_bias = a->gyro_bias_acc / (float)GYRO_CALIB_FRAMES;
+                a->gyro_calibrated = true;
+            }
+        } else if (a->gyro_calibrated &&
+                   a->settings.gyro_mode != GRAVE_GYRO_OFF) {
+            float dps = (float)rate.z - a->gyro_bias;
+            float mult;
+            const float limit = 300.0f;
+
+            /* low-pass: kills the 1-frame gyro noise/jitter */
+            a->gyro_filtered += (dps - a->gyro_filtered) * 0.35f;
+            dps = a->gyro_filtered;
+            if (fabsf(dps) < 1.7f)
+                dps = 0.0f;                    /* deadzone (dps)           */
+            if (a->settings.gyro_sens == GRAVE_GYRO_SENS_LOW)
+                mult = 0.30f;
+            else if (a->settings.gyro_sens == GRAVE_GYRO_SENS_HIGH)
+                mult = 0.90f;
+            else
+                mult = 0.55f;
+            dps *= mult;
+            if (a->settings.gyro_mode == GRAVE_GYRO_INVERT)
+                dps = -dps;
+            if (dps > limit)
+                dps = limit;
+            else if (dps < -limit)
+                dps = -limit;
+            a->input.gyro_yaw = dps * (3.14159265f / 180.0f); /* rad/s   */
+        }
     }
 #endif
 #if defined(KEY_CSTICK_LEFT) && defined(KEY_CSTICK_RIGHT)
@@ -733,8 +836,12 @@ void app_poll_input(void)
             int action = UI_ACTION_NONE;
             int arg = 0;
 
-            if (ui_hit_test(a, tx, ty, &action, &arg))
+            if (ui_hit_test(a, tx, ty, &action, &arg)) {
+                a->press_timer = 0.20f;
+                a->press_x = (float)tx;
+                a->press_y = (float)ty;
                 apply_action(a, action, arg);
+            }
         }
         a->touch_dragging = false;
     }
@@ -755,6 +862,8 @@ void app_poll_input(void)
             } else {
                 a->paused = true;
                 a->page = APP_PAGE_PAUSE;
+                if (a->gyro_ok)
+                    app_gyro_begin_calibration(a);
             }
             break;
         case APP_PAGE_PAUSE:
@@ -862,6 +971,39 @@ void app_step(void)
             a->wardrobe_flash = 0.0f;
     }
 
+    /* ---- v0.5 juice: mascot moods, press ring, banner, count-up numbers ---- */
+    if (a->mascot_timer > 0.0f) {
+        a->mascot_timer -= FIXED_DT;
+        if (a->mascot_timer < 0.0f)
+            a->mascot_timer = 0.0f;
+    }
+    if (a->mascot_timer <= 0.0f) {
+        if (a->game.player.max_hp > 0.0f &&
+            a->game.player.hp < a->game.player.max_hp * 0.25f)
+            a->mascot_mood = APP_MASCOT_PALE;
+        else
+            a->mascot_mood = APP_MASCOT_IDLE;
+    }
+    if (a->press_timer > 0.0f) {
+        a->press_timer -= FIXED_DT;
+        if (a->press_timer < 0.0f)
+            a->press_timer = 0.0f;
+    }
+    if (a->banner_timer > 0.0f) {
+        a->banner_timer -= FIXED_DT;
+        if (a->banner_timer < 0.0f)
+            a->banner_timer = 0.0f;
+    }
+    a->display_coins = app_approach(a->display_coins,
+                                    (float)a->game.material_coins,
+                                    220.0f * FIXED_DT);
+    a->display_sinew = app_approach(a->display_sinew,
+                                    (float)a->game.material_sinew,
+                                    220.0f * FIXED_DT);
+    a->display_charms = app_approach(a->display_charms,
+                                     (float)a->game.material_bone_charms,
+                                     220.0f * FIXED_DT);
+
     /* App-local WORLD NEW badges: a zone that just unlocked is flagged until
      * the player views the maps (cleared in show_tab / enter_zone). */
     {
@@ -900,6 +1042,20 @@ void app_step(void)
             audio_set_weapon(a->last_weapon);
         }
         audio_play_event(events);
+
+        /* v0.5 mascot reacts to what just happened */
+        if ((events & (GRAVE_EVT_ZOMBIE_DIE | GRAVE_EVT_PICKUP)) != 0u) {
+            a->mascot_mood = APP_MASCOT_HAPPY;
+            a->mascot_timer = 1.3f;
+        }
+        if ((events & GRAVE_EVT_HURT) != 0u) {
+            a->mascot_mood = APP_MASCOT_WORRIED;
+            a->mascot_timer = 1.2f;
+        }
+        if ((events & GRAVE_EVT_BOSS_SPAWN) != 0u) {
+            snprintf(a->banner, sizeof(a->banner), "%s", "THE FOREMAN");
+            a->banner_timer = 2.6f;
+        }
 
         /* damage feedback */
         if (g->player.hp < a->prev_hp - 0.01f)

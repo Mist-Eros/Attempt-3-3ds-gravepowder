@@ -36,6 +36,14 @@ enum {
     APP_SENS_COUNT
 };
 
+/* v0.5: procedural mascot moods (driven by events / HP in app_step). */
+typedef enum {
+    APP_MASCOT_IDLE = 0,
+    APP_MASCOT_HAPPY,
+    APP_MASCOT_WORRIED,
+    APP_MASCOT_PALE
+} AppMascotMood;
+
 /* Bottom-screen info tabs (the HUD page is now a paged info display). */
 typedef enum {
     APP_TAB_AREA = 0,   /* top-down map of the current zone            */
@@ -104,10 +112,28 @@ struct App {
     bool wardrobe_reload_ok; /* result of the last r3d_reload_all_models() */
     float wardrobe_flash;    /* timer for the reload status line           */
 
-    /* v0.4: 3DS motion sensor state (the gyro code is compiled only on device;
-     * the host preview harness keeps building with these fields at 0/false). */
+    /* v0.5: 3DS motion pipeline (gyro code compiles only on device; the host
+     * preview harness keeps these fields at 0/false). */
+    bool gyro_attempted;     /* lazy enable tried on first poll frame      */
     bool gyro_ok;            /* HIDUSER enables + coefficient succeeded    */
+    bool gyro_calibrated;    /* rest-frame bias measured                   */
     float gyro_coef;         /* raw gyro units -> degrees/second           */
+    float gyro_bias;         /* averaged rest rate subtracted from raw     */
+    float gyro_bias_acc;     /* calibration accumulator                    */
+    int gyro_calib_left;     /* calibration frames remaining               */
+    float gyro_filtered;     /* low-pass filtered yaw rate (dps)           */
+
+    /* v0.5 juice / animation timers (all deterministic, dt-driven). */
+    int mascot_mood;         /* AppMascotMood                              */
+    float mascot_timer;      /* remaining time in the current mood         */
+    float press_timer;       /* touch-press ring timer                     */
+    float press_x;
+    float press_y;
+    float display_coins;     /* count-up values shown in PACK/SHOP         */
+    float display_sinew;
+    float display_charms;
+    float banner_timer;      /* wave/boss pop-in banner                    */
+    char banner[32];
 
     /* Audio bookkeeping. */
     GraveMusic music;
